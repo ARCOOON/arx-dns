@@ -12,17 +12,23 @@ const (
 	maxCNAMEChainDepth = 8
 )
 
-// Processor resolves authoritative DNS queries against an in-memory zone store.
+// Processor resolves authoritative DNS queries against an in-memory zone store and
+// forwards unresolved recursive queries to upstream resolvers when configured.
 type Processor struct {
-	store *storage.Memory
+	store     *storage.Memory
+	forwarder *Forwarder
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory) *Processor {
-	return &Processor{store: store}
+func New(store *storage.Memory, forwarder *Forwarder) *Processor {
+	return &Processor{
+		store:     store,
+		forwarder: forwarder,
+	}
 }
 
-// Response parses a DNS query payload and returns an authoritative answer or NXDOMAIN.
+// Response parses a DNS query payload and returns an authoritative answer, a forwarded
+// recursive answer, or NXDOMAIN when the name is unknown and recursion is not requested.
 func (p *Processor) Response(payload []byte) ([]byte, error) {
 	if len(payload) < dnsHeaderSize || len(payload) > maxMessageSize {
 		return nil, mdns.ErrBuf
@@ -33,23 +39,52 @@ func (p *Processor) Response(payload []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	resp := new(mdns.Msg)
-	resp.SetReply(req)
-	resp.Authoritative = true
-
 	if len(req.Question) == 0 {
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		resp.RecursionAvailable = true
+		resp.Authoritative = true
 		resp.Rcode = mdns.RcodeFormatError
 		return resp.Pack()
 	}
 
 	q := req.Question[0]
+	records, rcode, needsForward := p.resolveQuestion(q)
 
-	var records []mdns.RR
-	var rcode int
+	if needsForward && req.RecursionDesired && p.forwarder != nil {
+		return p.forwardQuery(req)
+	}
 
+	resp := new(mdns.Msg)
+	resp.SetReply(req)
+	resp.Authoritative = true
+	resp.RecursionAvailable = true
+	resp.Rcode = rcode
+	resp.Answer = records
+	return resp.Pack()
+}
+
+func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
+	resp, err := p.forwarder.Exchange(req)
+	if err != nil {
+		fallback := new(mdns.Msg)
+		fallback.SetReply(req)
+		fallback.RecursionAvailable = true
+		fallback.Authoritative = false
+		fallback.Rcode = mdns.RcodeServerFailure
+		return fallback.Pack()
+	}
+
+	resp.SetReply(req)
+	resp.RecursionAvailable = true
+	return resp.Pack()
+}
+
+func (p *Processor) resolveQuestion(q mdns.Question) (records []mdns.RR, rcode int, needsForward bool) {
 	switch q.Qtype {
 	case mdns.TypeA, mdns.TypeAAAA:
 		records, rcode = p.resolveAddress(q.Name, q.Qtype)
+		needsForward = rcode == mdns.RcodeNameError
 	default:
 		var status storage.LookupStatus
 		records, status = p.store.Lookup(q.Name, q.Qtype)
@@ -60,12 +95,10 @@ func (p *Processor) Response(payload []byte) ([]byte, error) {
 			rcode = mdns.RcodeSuccess
 		default:
 			rcode = mdns.RcodeNameError
+			needsForward = true
 		}
 	}
-
-	resp.Rcode = rcode
-	resp.Answer = records
-	return resp.Pack()
+	return records, rcode, needsForward
 }
 
 // resolveAddress returns A or AAAA records, following CNAME chains when needed.
