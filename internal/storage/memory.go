@@ -2,7 +2,7 @@ package storage
 
 import (
 	"strings"
-	"sync"
+	"sync/atomic"
 
 	"github.com/armon/go-radix"
 	mdns "github.com/miekg/dns"
@@ -21,16 +21,30 @@ const (
 )
 
 // Memory is a thread-safe in-memory authoritative zone store backed by a radix tree.
+// Lookups load the active tree pointer atomically for lock-free reads; reloads build a
+// new tree in the background and swap it in with atomic.Value.
 type Memory struct {
-	mu   sync.RWMutex
-	tree *radix.Tree
+	tree atomic.Value // holds *radix.Tree
 }
 
 // NewMemory creates an empty in-memory store.
 func NewMemory() *Memory {
-	return &Memory{
-		tree: radix.New(),
+	m := &Memory{}
+	m.tree.Store(radix.New())
+	return m
+}
+
+// SwapTree atomically replaces the active radix tree. The previous tree remains
+// readable by in-flight lookups until they finish.
+func (m *Memory) SwapTree(tree *radix.Tree) {
+	if tree == nil {
+		tree = radix.New()
 	}
+	m.tree.Store(tree)
+}
+
+func (m *Memory) currentTree() *radix.Tree {
+	return m.tree.Load().(*radix.Tree)
 }
 
 // NormalizeName returns the FQDN in lowercase with a trailing dot.
@@ -46,9 +60,15 @@ func NormalizeName(name string) string {
 	return name
 }
 
-// InsertRR adds a DNS resource record to the store.
+// InsertRR adds a DNS resource record to the active tree. It is intended for
+// single-threaded initialization and tests; production reloads build a fresh tree
+// off the request path and swap it in atomically.
 func (m *Memory) InsertRR(rr mdns.RR) {
-	if rr == nil {
+	insertRR(m.currentTree(), rr)
+}
+
+func insertRR(tree *radix.Tree, rr mdns.RR) {
+	if rr == nil || tree == nil {
 		return
 	}
 
@@ -56,10 +76,7 @@ func (m *Memory) InsertRR(rr mdns.RR) {
 	name := NormalizeName(hdr.Name)
 	qtype := hdr.Rrtype
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	raw, ok := m.tree.Get(name)
+	raw, ok := tree.Get(name)
 	var byType map[uint16][]mdns.RR
 	if ok {
 		byType = raw.(map[uint16][]mdns.RR)
@@ -68,17 +85,15 @@ func (m *Memory) InsertRR(rr mdns.RR) {
 	}
 
 	byType[qtype] = append(byType[qtype], rr)
-	m.tree.Insert(name, byType)
+	tree.Insert(name, byType)
 }
 
 // Lookup returns resource records for the given FQDN and query type.
 func (m *Memory) Lookup(name string, qtype uint16) ([]mdns.RR, LookupStatus) {
 	name = NormalizeName(name)
+	tree := m.currentTree()
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	raw, ok := m.tree.Get(name)
+	raw, ok := tree.Get(name)
 	if !ok {
 		return nil, LookupNotFound
 	}

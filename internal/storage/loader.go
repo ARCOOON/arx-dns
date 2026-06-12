@@ -9,26 +9,39 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armon/go-radix"
 	mdns "github.com/miekg/dns"
 )
 
-// LoadZonesFromDir scans dir for files with a .zone extension and loads each
-// into store. Malformed files are logged and skipped; loading never panics.
+// LoadZonesFromDir scans dir for files with a .zone extension, builds a new radix
+// tree, and atomically swaps it into store. Malformed files are logged and skipped;
+// loading never panics. When dir does not exist, the active tree is left unchanged.
 func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	tree, loaded, skipped := buildTreeFromDir(dir, logger)
+	if tree == nil {
+		return
+	}
+
+	store.SwapTree(tree)
+	logger.Info("zone loading complete", "directory", dir, "loaded", loaded, "skipped", skipped)
+}
+
+func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			logger.Warn("zones directory not found", "path", dir)
-			return
+			return nil, 0, 0
 		}
 		logger.Error("failed to read zones directory", "path", dir, "error", err)
-		return
+		return nil, 0, 0
 	}
 
+	tree := radix.New()
 	var loaded, skipped int
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -39,7 +52,7 @@ func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 		}
 
 		path := filepath.Join(dir, entry.Name())
-		if err := loadZoneFile(path, store, logger); err != nil {
+		if err := loadZoneFile(path, tree, logger); err != nil {
 			logger.Error("skipped malformed zone file", "path", path, "error", err)
 			skipped++
 			continue
@@ -47,10 +60,10 @@ func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 		loaded++
 	}
 
-	logger.Info("zone loading complete", "directory", dir, "loaded", loaded, "skipped", skipped)
+	return tree, loaded, skipped
 }
 
-func loadZoneFile(path string, store *Memory, logger *slog.Logger) error {
+func loadZoneFile(path string, tree *radix.Tree, logger *slog.Logger) error {
 	origin, err := resolveZoneOrigin(path)
 	if err != nil {
 		return err
@@ -65,7 +78,7 @@ func loadZoneFile(path string, store *Memory, logger *slog.Logger) error {
 	parser := mdns.NewZoneParser(f, origin, path)
 	var count int
 	for rr, ok := parser.Next(); ok; rr, ok = parser.Next() {
-		store.InsertRR(rr)
+		insertRR(tree, rr)
 		count++
 	}
 	if err := parser.Err(); err != nil {
