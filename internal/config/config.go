@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -15,6 +16,8 @@ import (
 // Config holds all arx-dns runtime settings loaded from a TOML file.
 type Config struct {
 	Server    ServerConfig    `toml:"server"`
+	TLS       TLSConfig       `toml:"tls"`
+	Listeners ListenersConfig `toml:"listeners"`
 	Zones     ZonesConfig     `toml:"zones"`
 	Recursive RecursiveConfig `toml:"recursive"`
 	Firewall  FirewallConfig  `toml:"firewall"`
@@ -25,6 +28,18 @@ type ServerConfig struct {
 	Listen     string `toml:"listen"`
 	Port       int    `toml:"port"`
 	EventLoops int    `toml:"event_loops"`
+}
+
+// TLSConfig holds the server certificate and private key for encrypted DNS transports.
+type TLSConfig struct {
+	CertFile string `toml:"cert_file"`
+	KeyFile  string `toml:"key_file"`
+}
+
+// ListenersConfig controls bind addresses for DNS-over-TLS and DNS-over-HTTPS.
+type ListenersConfig struct {
+	DoT string `toml:"dot"`
+	DoH string `toml:"doh"`
 }
 
 // ZonesConfig controls authoritative zone file storage.
@@ -47,6 +62,8 @@ type FirewallConfig struct {
 const (
 	defaultListen            = "0.0.0.0"
 	defaultPort              = 53
+	defaultDoTListen         = ":853"
+	defaultDoHListen         = ":443"
 	defaultZonesDir          = "./zones"
 	defaultBlocklistsDir     = "./blocklists"
 	defaultBlockAction       = "NXDOMAIN"
@@ -61,6 +78,10 @@ func Default() Config {
 			Listen:     defaultListen,
 			Port:       defaultPort,
 			EventLoops: 0,
+		},
+		Listeners: ListenersConfig{
+			DoT: defaultDoTListen,
+			DoH: defaultDoHListen,
 		},
 		Zones: ZonesConfig{
 			Directory: defaultZonesDir,
@@ -161,6 +182,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Firewall.BlockAction) == "" {
 		c.Firewall.BlockAction = def.Firewall.BlockAction
 	}
+	if strings.TrimSpace(c.Listeners.DoT) == "" {
+		c.Listeners.DoT = def.Listeners.DoT
+	}
+	if strings.TrimSpace(c.Listeners.DoH) == "" {
+		c.Listeners.DoH = def.Listeners.DoH
+	}
 }
 
 // Validate checks that all configuration fields are usable at runtime.
@@ -186,8 +213,57 @@ func (c Config) Validate() error {
 	if _, err := c.NormalizedUpstreams(); err != nil {
 		return err
 	}
+	if err := c.validateTLS(); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+func (c Config) validateTLS() error {
+	cert := strings.TrimSpace(c.TLS.CertFile)
+	key := strings.TrimSpace(c.TLS.KeyFile)
+
+	if cert == "" && key == "" {
+		return nil
+	}
+	if cert == "" {
+		return errors.New("tls.cert_file is required when tls.key_file is set")
+	}
+	if key == "" {
+		return errors.New("tls.key_file is required when tls.cert_file is set")
+	}
+
+	if _, err := os.Stat(cert); err != nil {
+		return fmt.Errorf("tls.cert_file %q: %w", cert, err)
+	}
+	if _, err := os.Stat(key); err != nil {
+		return fmt.Errorf("tls.key_file %q: %w", key, err)
+	}
+
+	return nil
+}
+
+// EncryptedDNSEnabled reports whether TLS certificate paths are configured.
+func (c Config) EncryptedDNSEnabled() bool {
+	return strings.TrimSpace(c.TLS.CertFile) != "" && strings.TrimSpace(c.TLS.KeyFile) != ""
+}
+
+// BuildTLSConfig loads the configured certificate pair for encrypted DNS listeners.
+func (c Config) BuildTLSConfig() (*tls.Config, error) {
+	if !c.EncryptedDNSEnabled() {
+		return nil, errors.New("tls certificate and key paths are required")
+	}
+
+	cert, err := tls.LoadX509KeyPair(c.TLS.CertFile, c.TLS.KeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("load tls certificate: %w", err)
+	}
+
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{cert},
+	}, nil
 }
 
 // ListenAddress returns the server bind address in host:port form.
