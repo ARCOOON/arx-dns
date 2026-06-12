@@ -1,10 +1,12 @@
 package dnsproc
 
 import (
+	"net"
 	"net/netip"
 
 	mdns "github.com/miekg/dns"
 
+	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
@@ -23,16 +25,18 @@ type Processor struct {
 	cache     *storage.ResponseCache
 	stats     *telemetry.Stats
 	acl       TrustedChecker
+	firewall  *firewall.Engine
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine) *Processor {
 	return &Processor{
 		store:     store,
 		forwarder: forwarder,
 		cache:     cache,
 		stats:     stats,
 		acl:       acl,
+		firewall:  fw,
 	}
 }
 
@@ -67,6 +71,11 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 
 	trusted := p.clientTrusted(client)
 	q := req.Question[0]
+
+	if p.firewall != nil && p.firewall.Blocked(q.Name) {
+		return p.blockedResponse(req, q, limitUDP)
+	}
+
 	records, rcode, needsForward := p.resolveQuestion(q, trusted)
 
 	if needsForward && req.RecursionDesired {
@@ -92,6 +101,51 @@ func (p *Processor) clientTrusted(client netip.Addr) bool {
 		return true
 	}
 	return p.acl.Trusted(client)
+}
+
+func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP bool) ([]byte, error) {
+	if p.stats != nil {
+		p.stats.IncFirewallBlocked()
+	}
+
+	resp := new(mdns.Msg)
+	resp.SetReply(req)
+	resp.Authoritative = true
+	resp.RecursionAvailable = true
+
+	switch p.firewall.Action() {
+	case firewall.BlockActionZeroIP:
+		switch q.Qtype {
+		case mdns.TypeA:
+			resp.Rcode = mdns.RcodeSuccess
+			resp.Answer = []mdns.RR{&mdns.A{
+				Hdr: mdns.RR_Header{
+					Name:   q.Name,
+					Rrtype: mdns.TypeA,
+					Class:  mdns.ClassINET,
+					Ttl:    300,
+				},
+				A: net.ParseIP("0.0.0.0"),
+			}}
+		case mdns.TypeAAAA:
+			resp.Rcode = mdns.RcodeSuccess
+			resp.Answer = []mdns.RR{&mdns.AAAA{
+				Hdr: mdns.RR_Header{
+					Name:   q.Name,
+					Rrtype: mdns.TypeAAAA,
+					Class:  mdns.ClassINET,
+					Ttl:    300,
+				},
+				AAAA: net.ParseIP("::"),
+			}}
+		default:
+			resp.Rcode = mdns.RcodeNameError
+		}
+	default:
+		resp.Rcode = mdns.RcodeNameError
+	}
+
+	return p.packResponse(resp, req, limitUDP)
 }
 
 func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool) ([]byte, error) {
