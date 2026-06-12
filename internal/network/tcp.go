@@ -19,10 +19,11 @@ const (
 type TCPReactor struct {
 	reactor
 	stats *telemetry.Stats
+	proc  *dnsproc.Processor
 }
 
 // NewTCPReactor creates a TCP reactor for the given configuration.
-func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats) *TCPReactor {
+func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor) *TCPReactor {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -36,6 +37,7 @@ func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats) *TCP
 			proto:  "tcp",
 		},
 		stats: stats,
+		proc:  proc,
 	}
 }
 
@@ -89,7 +91,7 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 			return gnet.Close
 		}
 
-		response, err := dnsproc.RefusedResponse(payload)
+		response, err := r.proc.Response(payload)
 		if err != nil {
 			r.logger.Debug("tcp parse failed", "error", err, "bytes", len(payload))
 			r.stats.IncParseError()
@@ -107,6 +109,6 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 		}
 
 		r.stats.IncTCPQuery()
-		r.stats.IncRefusedAnswer()
+		recordAnswer(r.stats, response)
 	}
 }

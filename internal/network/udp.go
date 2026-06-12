@@ -13,10 +13,11 @@ import (
 type UDPReactor struct {
 	reactor
 	stats *telemetry.Stats
+	proc  *dnsproc.Processor
 }
 
 // NewUDPReactor creates a UDP reactor for the given configuration.
-func NewUDPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats) *UDPReactor {
+func NewUDPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor) *UDPReactor {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -30,6 +31,7 @@ func NewUDPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats) *UDP
 			proto:  "udp",
 		},
 		stats: stats,
+		proc:  proc,
 	}
 }
 
@@ -49,7 +51,7 @@ func (r *UDPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 		return gnet.None
 	}
 
-	response, err := dnsproc.RefusedResponse(payload)
+	response, err := r.proc.Response(payload)
 	if err != nil {
 		r.logger.Debug("udp parse failed", "error", err, "bytes", len(payload))
 		r.stats.IncParseError()
@@ -63,6 +65,6 @@ func (r *UDPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 	}
 
 	r.stats.IncUDPQuery()
-	r.stats.IncRefusedAnswer()
+	recordAnswer(r.stats, response)
 	return gnet.None
 }
