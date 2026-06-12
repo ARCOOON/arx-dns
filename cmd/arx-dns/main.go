@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/ARCOOON/arx-dns/internal/network"
+	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
 
 const defaultListenAddress = "[::]:53"
@@ -25,38 +26,39 @@ func main() {
 	cfg := network.Config{
 		Address: defaultListenAddress,
 	}
+	stats := telemetry.New()
 
-	udpListener := network.NewUDPListener(cfg, logger)
-	tcpListener := network.NewTCPListener(cfg, logger)
+	udpReactor := network.NewUDPReactor(cfg, logger, stats)
+	tcpReactor := network.NewTCPReactor(cfg, logger, stats)
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 
-	startListener := func(name string, run func(context.Context) error) {
+	startReactor := func(name string, run func(context.Context) error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error("listener stopped with error", "protocol", name, "error", err)
+				logger.Error("reactor stopped with error", "protocol", name, "error", err)
 				errCh <- err
 				stop()
 			}
 		}()
 	}
 
-	logger.Info("starting arx-dns listeners", "address", cfg.Address)
-	startListener("udp", udpListener.Run)
-	startListener("tcp", tcpListener.Run)
+	logger.Info("starting arx-dns reactors", "address", cfg.Address)
+	startReactor("udp", udpReactor.Run)
+	startReactor("tcp", tcpReactor.Run)
 
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
 	case err := <-errCh:
-		logger.Error("fatal listener error", "error", err)
+		logger.Error("fatal reactor error", "error", err)
 		os.Exit(1)
 	}
 
 	stop()
 	wg.Wait()
-	logger.Info("arx-dns stopped")
+	logger.Info("arx-dns stopped", "stats", stats.Snapshot())
 }
