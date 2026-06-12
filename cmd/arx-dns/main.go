@@ -12,8 +12,6 @@ import (
 	"sync"
 	"syscall"
 
-	mdns "github.com/miekg/dns"
-
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/network"
 	"github.com/ARCOOON/arx-dns/internal/storage"
@@ -24,6 +22,7 @@ func main() {
 	listen := flag.String("listen", "0.0.0.0", "IP address to bind to")
 	port := flag.Int("port", 53, "port to bind to")
 	loops := flag.Int("loops", 0, "number of gnet event loops (0 uses all CPU cores)")
+	zones := flag.String("zones", "./zones", "directory containing BIND .zone files")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -34,7 +33,7 @@ func main() {
 	defer stop()
 
 	store := storage.NewMemory()
-	seedDemoZone(store)
+	storage.LoadZonesFromDir(*zones, store, logger)
 
 	proc := dnsproc.New(store)
 	stats := telemetry.New()
@@ -80,36 +79,4 @@ func main() {
 	stop()
 	wg.Wait()
 	logger.Info("arx-dns stopped", "stats", stats.Snapshot())
-}
-
-func seedDemoZone(store *storage.Memory) {
-	store.InsertRR(&mdns.A{
-		Hdr: mdns.RR_Header{
-			Name:   "router.arx.local.",
-			Rrtype: mdns.TypeA,
-			Class:  mdns.ClassINET,
-			Ttl:    300,
-		},
-		A: net.ParseIP("10.10.0.1"),
-	})
-
-	store.InsertRR(&mdns.AAAA{
-		Hdr: mdns.RR_Header{
-			Name:   "router.arx.local.",
-			Rrtype: mdns.TypeAAAA,
-			Class:  mdns.ClassINET,
-			Ttl:    300,
-		},
-		AAAA: net.ParseIP("fd00::1"),
-	})
-
-	store.InsertRR(&mdns.CNAME{
-		Hdr: mdns.RR_Header{
-			Name:   "www.arx.local.",
-			Rrtype: mdns.TypeCNAME,
-			Class:  mdns.ClassINET,
-			Ttl:    300,
-		},
-		Target: "router.arx.local.",
-	})
 }
