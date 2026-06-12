@@ -9,6 +9,7 @@ import (
 
 	mdns "github.com/miekg/dns"
 
+	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
 
@@ -24,7 +25,15 @@ type Forwarder struct {
 	stats     *telemetry.Stats
 }
 
-// NewForwarder creates an upstream client that tries each resolver in order until one succeeds.
+// NewForwarderFromConfig builds an upstream forwarder from application configuration.
+func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats) (*Forwarder, error) {
+	addrs, err := cfg.NormalizedUpstreams()
+	if err != nil {
+		return nil, err
+	}
+	return NewForwarder(addrs, stats), nil
+}
+
 func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
 	addrs := make([]string, len(upstreams))
 	copy(addrs, upstreams)
@@ -42,9 +51,14 @@ func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
 // ParseUpstreams splits a comma-separated upstream list and normalizes each entry to host:port.
 func ParseUpstreams(raw string) ([]string, error) {
 	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
+	return NormalizeUpstreams(parts)
+}
 
-	for _, part := range parts {
+// NormalizeUpstreams normalizes each upstream entry to host:port form.
+func NormalizeUpstreams(addrs []string) ([]string, error) {
+	out := make([]string, 0, len(addrs))
+
+	for _, part := range addrs {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
