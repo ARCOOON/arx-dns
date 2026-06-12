@@ -79,7 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw)
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, logger)
 	reactors := network.NewReactors(cfg, logger, stats, proc)
 
 	var wg sync.WaitGroup
@@ -108,6 +108,7 @@ func main() {
 		"blocklists", cfg.Firewall.BlocklistsDirectory,
 		"block_action", fwAction,
 		"encrypted_dns", cfg.EncryptedDNSEnabled(),
+		"dnssec_validation", cfg.Security.DNSSECValidation,
 	)
 	apiServer := api.New(cfg, stats, store, logger)
 	startService("api", apiServer.Run)
