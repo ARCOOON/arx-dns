@@ -6,10 +6,10 @@
 
 ## 1. Network Layer & Core I/O
 
-- [ ] **Dual-Stack Support:** Native support for IPv4 and IPv6 across all interfaces.
-- [ ] **Protocol Support:** Concurrent handling of UDP and TCP on Port 53 (RFC 1035).
+- [x] **Dual-Stack Support:** Native support for IPv4 and IPv6 across all interfaces (`[::]:53` with `IPV6_V6ONLY=0`).
+- [x] **Protocol Support:** Concurrent handling of UDP and TCP on Port 53 (RFC 1035 length-prefixed TCP framing; UDP datagram receive).
 - [ ] **High-Concurrency Engine:** Event-driven, non-blocking I/O architecture (using `epoll`, `kqueue`, or `io_uring`) to process millions of Queries Per Second (QPS).
-- [ ] **SO_REUSEPORT Implementation:** Kernel-level load balancing for multi-core scaling.
+- [x] **SO_REUSEPORT Implementation:** Kernel-level load balancing for multi-core scaling (`runtime.NumCPU()` sockets per protocol).
 - [ ] **Connection Management:** TCP connection pooling, keep-alive timers, and protection against TCP resource exhaustion (e.g., Slowloris mitigation).
 
 ## 2. DNS Packet Parsing & Protocol Core

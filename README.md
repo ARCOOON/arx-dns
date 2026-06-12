@@ -13,6 +13,24 @@ High-performance, enterprise-grade DNS server for the ARX ecosystem.
 
 Strictly adheres to KISS and DRY principles. Operates without heavy third-party frameworks. Direct system-level socket management and strict RFC 1035 compliant binary parsing.
 
+### Project Layout
+
+| Path                    | Purpose                                              |
+| ----------------------- | ---------------------------------------------------- |
+| `cmd/arx-dns/`          | Server entrypoint (signal handling, listener startup) |
+| `internal/network/`     | UDP/TCP listeners with `SO_REUSEPORT` socket control |
+
+## Build & Run
+
+```bash
+go build -o arx-dns ./cmd/arx-dns/
+sudo ./arx-dns   # or run inside the devcontainer (port 53 allowed for vscode)
+```
+
+The server binds `[::]:53` on all interfaces with dual-stack IPv4/IPv6. It listens concurrently on UDP and TCP using `SO_REUSEPORT` (one socket per CPU core per protocol). Incoming requests are read and logged by payload size; DNS parsing and responses are not implemented yet.
+
+Graceful shutdown is triggered by `SIGINT` or `SIGTERM`.
+
 ## Development Environment
 
 The project ships a [Dev Containers](https://containers.dev/) configuration for Linux-native DNS development (privileged port 53, `SO_REUSEPORT`, and low-level socket work).
