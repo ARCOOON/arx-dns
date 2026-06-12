@@ -5,13 +5,12 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
-	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync"
 	"syscall"
 
+	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/network"
@@ -20,58 +19,45 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", "0.0.0.0", "IP address to bind to")
-	port := flag.Int("port", 53, "port to bind to")
-	loops := flag.Int("loops", 0, "number of gnet event loops (0 uses all CPU cores)")
-	zones := flag.String("zones", "./zones", "directory containing BIND .zone files")
-	upstreams := flag.String("upstreams", "1.1.1.1:53,1.0.0.1:53", "comma-separated upstream DNS resolvers for recursive forwarding")
-	trustedSubnets := flag.String("trusted-subnets", "127.0.0.0/8,10.0.0.0/8,192.168.0.0/16", "comma-separated CIDR prefixes allowed to use recursive forwarding")
-	blocklists := flag.String("blocklists", "./blocklists", "directory containing plain-text domain blocklists")
-	blockAction := flag.String("block-action", "NXDOMAIN", "firewall action for blocked domains: NXDOMAIN or ZEROIP")
+	configPath := flag.String("config", "./config.toml", "path to the TOML configuration file")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		logger.Error("failed to load configuration", "config", *configPath, "error", err)
+		os.Exit(1)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	store := storage.NewMemory()
-	storage.LoadZonesFromDir(*zones, store, logger)
+	storage.LoadZones(cfg.Zones, store, logger)
 
-	if err := storage.StartWatcher(ctx, *zones, store, logger); err != nil {
-		logger.Error("failed to start zone file watcher", "directory", *zones, "error", err)
+	if err := storage.StartWatcher(ctx, cfg.Zones, store, logger); err != nil {
+		logger.Error("failed to start zone file watcher", "directory", cfg.Zones.Directory, "error", err)
 		os.Exit(1)
 	}
 
-	fwAction, err := firewall.ParseBlockAction(*blockAction)
+	fwAction, err := firewall.ParseBlockAction(cfg.Firewall.BlockAction)
 	if err != nil {
-		logger.Error("invalid block-action configuration", "block_action", *blockAction, "error", err)
+		logger.Error("invalid firewall block action", "block_action", cfg.Firewall.BlockAction, "error", err)
 		os.Exit(1)
 	}
 
 	fw := firewall.New(fwAction)
-	firewall.LoadFromDir(*blocklists, fw, logger)
+	firewall.Load(cfg.Firewall, fw, logger)
 
-	if err := firewall.StartWatcher(ctx, *blocklists, fw, logger); err != nil {
-		logger.Error("failed to start blocklist watcher", "directory", *blocklists, "error", err)
+	if err := firewall.StartWatcher(ctx, cfg.Firewall, fw, logger); err != nil {
+		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
 		os.Exit(1)
 	}
 
 	stats := telemetry.New()
-
-	acl, err := network.ParseACL(*trustedSubnets)
-	if err != nil {
-		logger.Error("invalid trusted subnets configuration", "trusted_subnets", *trustedSubnets, "error", err)
-		os.Exit(1)
-	}
-
-	upstreamAddrs, err := dnsproc.ParseUpstreams(*upstreams)
-	if err != nil {
-		logger.Error("invalid upstream configuration", "upstreams", *upstreams, "error", err)
-		os.Exit(1)
-	}
 
 	responseCache, err := storage.NewResponseCache()
 	if err != nil {
@@ -79,16 +65,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	forwarder := dnsproc.NewForwarder(upstreamAddrs, stats)
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw)
-
-	cfg := network.Config{
-		Address:          net.JoinHostPort(*listen, strconv.Itoa(*port)),
-		ReusePortSockets: *loops,
+	acl, err := network.ACLFromConfig(cfg)
+	if err != nil {
+		logger.Error("invalid trusted subnets configuration", "trusted_subnets", cfg.Recursive.TrustedSubnets, "error", err)
+		os.Exit(1)
 	}
 
-	udpReactor := network.NewUDPReactor(cfg, logger, stats, proc)
-	tcpReactor := network.NewTCPReactor(cfg, logger, stats, proc)
+	forwarder, err := dnsproc.NewForwarderFromConfig(cfg, stats)
+	if err != nil {
+		logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
+		os.Exit(1)
+	}
+
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw)
+	reactors := network.NewReactors(cfg, logger, stats, proc)
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
@@ -106,15 +96,17 @@ func main() {
 	}
 
 	logger.Info("starting arx-dns reactors",
-		"address", cfg.Address,
-		"event_loops", cfg.ReusePortSockets,
-		"upstreams", upstreamAddrs,
-		"trusted_subnets", *trustedSubnets,
-		"blocklists", *blocklists,
+		"config", *configPath,
+		"address", cfg.ListenAddress(),
+		"event_loops", cfg.Server.EventLoops,
+		"zones", cfg.Zones.Directory,
+		"upstreams", cfg.Recursive.Upstreams,
+		"trusted_subnets", cfg.Recursive.TrustedSubnets,
+		"blocklists", cfg.Firewall.BlocklistsDirectory,
 		"block_action", fwAction,
 	)
-	startReactor("udp", udpReactor.Run)
-	startReactor("tcp", tcpReactor.Run)
+	startReactor("udp", reactors.UDP.Run)
+	startReactor("tcp", reactors.TCP.Run)
 
 	select {
 	case <-ctx.Done():
