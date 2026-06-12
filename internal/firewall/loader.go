@@ -10,7 +10,15 @@ import (
 	"strings"
 
 	"github.com/armon/go-radix"
+
+	"github.com/ARCOOON/arx-dns/internal/config"
 )
+
+// Load reads all regular files in cfg.BlocklistsDirectory (one domain per line),
+// builds a fresh radix tree, and atomically swaps it into the engine.
+func Load(cfg config.FirewallConfig, engine *Engine, logger *slog.Logger) {
+	LoadFromDir(cfg.BlocklistsDirectory, engine, logger)
+}
 
 // LoadFromDir reads all regular files in dir (one domain per line), builds a
 // fresh radix tree, and atomically swaps it into the engine.

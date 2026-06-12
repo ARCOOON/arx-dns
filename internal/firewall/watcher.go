@@ -9,13 +9,19 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/ARCOOON/arx-dns/internal/config"
 )
 
 const defaultReloadDebounce = 500 * time.Millisecond
 
-// StartWatcher watches dir for create, write, and remove events on blocklist
-// files and hot-reloads the firewall radix tree atomically.
-func StartWatcher(ctx context.Context, dir string, engine *Engine, logger *slog.Logger) error {
+// StartWatcher watches cfg.BlocklistsDirectory for create, write, and remove
+// events on blocklist files and hot-reloads the firewall radix tree atomically.
+func StartWatcher(ctx context.Context, cfg config.FirewallConfig, engine *Engine, logger *slog.Logger) error {
+	return startWatcher(ctx, cfg.BlocklistsDirectory, engine, logger)
+}
+
+func startWatcher(ctx context.Context, dir string, engine *Engine, logger *slog.Logger) error {
 	if engine == nil {
 		return nil
 	}
