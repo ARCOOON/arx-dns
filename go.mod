@@ -8,6 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/miekg/dns v1.1.72
 	github.com/panjf2000/gnet/v2 v2.9.8
+	github.com/pelletier/go-toml/v2 v2.3.1
 )
 
 require (
