@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -81,21 +82,21 @@ func main() {
 	reactors := network.NewReactors(cfg, logger, stats, proc)
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 4)
 
-	startReactor := func(name string, run func(context.Context) error) {
+	startService := func(name string, run func(context.Context) error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-				logger.Error("reactor stopped with error", "protocol", name, "error", err)
+				logger.Error("service stopped with error", "protocol", name, "error", err)
 				errCh <- err
 				stop()
 			}
 		}()
 	}
 
-	logger.Info("starting arx-dns reactors",
+	logger.Info("starting arx-dns",
 		"config", *configPath,
 		"address", cfg.ListenAddress(),
 		"event_loops", cfg.Server.EventLoops,
@@ -104,15 +105,33 @@ func main() {
 		"trusted_subnets", cfg.Recursive.TrustedSubnets,
 		"blocklists", cfg.Firewall.BlocklistsDirectory,
 		"block_action", fwAction,
+		"encrypted_dns", cfg.EncryptedDNSEnabled(),
 	)
-	startReactor("udp", reactors.UDP.Run)
-	startReactor("tcp", reactors.TCP.Run)
+	startService("udp", reactors.UDP.Run)
+	startService("tcp", reactors.TCP.Run)
+
+	if cfg.EncryptedDNSEnabled() {
+		tlsCfg, err := cfg.BuildTLSConfig()
+		if err != nil {
+			logger.Error("failed to load tls configuration", "error", err)
+			os.Exit(1)
+		}
+
+		if strings.TrimSpace(cfg.Listeners.DoT) != "" {
+			dot := network.NewDoTServer(cfg.Listeners.DoT, tlsCfg, logger, stats, proc)
+			startService("dot", dot.Run)
+		}
+		if strings.TrimSpace(cfg.Listeners.DoH) != "" {
+			doh := network.NewDoHServer(cfg.Listeners.DoH, tlsCfg, logger, stats, proc)
+			startService("doh", doh.Run)
+		}
+	}
 
 	select {
 	case <-ctx.Done():
 		logger.Info("shutdown signal received")
 	case err := <-errCh:
-		logger.Error("fatal reactor error", "error", err)
+		logger.Error("fatal service error", "error", err)
 		os.Exit(1)
 	}
 
