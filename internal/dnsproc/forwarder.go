@@ -20,9 +20,10 @@ var ErrAllUpstreamsFailed = errors.New("all upstream DNS servers failed")
 
 // Forwarder sends recursive queries to configured upstream resolvers with sequential fallback.
 type Forwarder struct {
-	upstreams []string
-	client    *mdns.Client
-	stats     *telemetry.Stats
+	upstreams        []string
+	client           *mdns.Client
+	stats            *telemetry.Stats
+	dnssecValidation bool
 }
 
 // NewForwarderFromConfig builds an upstream forwarder from application configuration.
@@ -31,7 +32,9 @@ func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats) (*Forward
 	if err != nil {
 		return nil, err
 	}
-	return NewForwarder(addrs, stats), nil
+	f := NewForwarder(addrs, stats)
+	f.dnssecValidation = cfg.Security.DNSSECValidation
+	return f, nil
 }
 
 func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
@@ -91,8 +94,10 @@ func (f *Forwarder) Exchange(req *mdns.Msg) (*mdns.Msg, error) {
 		return nil, ErrAllUpstreamsFailed
 	}
 
+	upstreamReq := f.prepareUpstreamRequest(req)
+
 	for _, upstream := range f.upstreams {
-		resp, _, err := f.client.Exchange(req, upstream)
+		resp, _, err := f.client.Exchange(upstreamReq, upstream)
 		if err != nil {
 			continue
 		}
@@ -110,4 +115,32 @@ func (f *Forwarder) Exchange(req *mdns.Msg) (*mdns.Msg, error) {
 		f.stats.IncUpstreamFailure()
 	}
 	return nil, ErrAllUpstreamsFailed
+}
+
+// prepareUpstreamRequest clones req and sets the EDNS DO bit when DNSSEC validation is enabled.
+func (f *Forwarder) prepareUpstreamRequest(req *mdns.Msg) *mdns.Msg {
+	upstreamReq := req.Copy()
+	if f != nil && f.dnssecValidation {
+		udpSize := uint16(mdns.DefaultMsgSize)
+		if opt := req.IsEdns0(); opt != nil && opt.UDPSize() >= mdns.MinMsgSize {
+			udpSize = opt.UDPSize()
+		}
+		upstreamReq.SetEdns0(udpSize, true)
+	}
+	return upstreamReq
+}
+
+// SetDNSSECValidation enables or disables the EDNS DO bit on upstream requests.
+func (f *Forwarder) SetDNSSECValidation(enabled bool) {
+	if f != nil {
+		f.dnssecValidation = enabled
+	}
+}
+
+// PrepareUpstreamRequest returns the upstream query with EDNS options applied.
+func (f *Forwarder) PrepareUpstreamRequest(req *mdns.Msg) *mdns.Msg {
+	if f == nil {
+		return req.Copy()
+	}
+	return f.prepareUpstreamRequest(req)
 }

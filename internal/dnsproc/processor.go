@@ -1,6 +1,7 @@
 package dnsproc
 
 import (
+	"log/slog"
 	"net"
 	"net/netip"
 
@@ -20,24 +21,33 @@ const (
 // Processor resolves authoritative DNS queries against an in-memory zone store and
 // forwards unresolved recursive queries to upstream resolvers when configured.
 type Processor struct {
-	store     *storage.Memory
-	forwarder *Forwarder
-	cache     *storage.ResponseCache
-	stats     *telemetry.Stats
-	acl       TrustedChecker
-	firewall  *firewall.Engine
+	store            *storage.Memory
+	forwarder        *Forwarder
+	cache            *storage.ResponseCache
+	stats            *telemetry.Stats
+	acl              TrustedChecker
+	firewall         *firewall.Engine
+	dnssecValidation bool
+	validator        *DNSSECValidator
+	logger           *slog.Logger
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine) *Processor {
-	return &Processor{
-		store:     store,
-		forwarder: forwarder,
-		cache:     cache,
-		stats:     stats,
-		acl:       acl,
-		firewall:  fw,
+func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, logger *slog.Logger) *Processor {
+	p := &Processor{
+		store:            store,
+		forwarder:        forwarder,
+		cache:            cache,
+		stats:            stats,
+		acl:              acl,
+		firewall:         fw,
+		dnssecValidation: dnssecValidation,
+		logger:           logger,
 	}
+	if dnssecValidation && forwarder != nil {
+		p.validator = NewDNSSECValidator(forwarder, stats, logger)
+	}
+	return p
 }
 
 // Response parses a UDP DNS query and returns a response with EDNS0 truncation when needed.
@@ -186,6 +196,32 @@ func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 		fallback.Authoritative = false
 		fallback.Rcode = mdns.RcodeServerFailure
 		return p.packResponse(fallback, req, limitUDP)
+	}
+
+	if p.dnssecValidation && p.validator != nil {
+		authenticated, valErr := p.validator.Validate(resp)
+		if valErr != nil {
+			if p.stats != nil {
+				p.stats.IncDNSSECValidationFailed()
+			}
+			if p.logger != nil {
+				q := req.Question[0]
+				p.logger.Warn("dnssec validation failed, dropping upstream response",
+					"qname", q.Name,
+					"qtype", mdns.TypeToString[q.Qtype],
+					"error", valErr,
+				)
+			}
+			fallback := new(mdns.Msg)
+			fallback.SetReply(req)
+			fallback.RecursionAvailable = true
+			fallback.Authoritative = false
+			fallback.Rcode = mdns.RcodeServerFailure
+			return p.packResponse(fallback, req, limitUDP)
+		}
+		if authenticated {
+			resp.AuthenticatedData = true
+		}
 	}
 
 	if p.cache != nil {
