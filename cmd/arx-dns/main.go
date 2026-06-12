@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
+	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/network"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
@@ -25,6 +26,8 @@ func main() {
 	zones := flag.String("zones", "./zones", "directory containing BIND .zone files")
 	upstreams := flag.String("upstreams", "1.1.1.1:53,1.0.0.1:53", "comma-separated upstream DNS resolvers for recursive forwarding")
 	trustedSubnets := flag.String("trusted-subnets", "127.0.0.0/8,10.0.0.0/8,192.168.0.0/16", "comma-separated CIDR prefixes allowed to use recursive forwarding")
+	blocklists := flag.String("blocklists", "./blocklists", "directory containing plain-text domain blocklists")
+	blockAction := flag.String("block-action", "NXDOMAIN", "firewall action for blocked domains: NXDOMAIN or ZEROIP")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -39,6 +42,20 @@ func main() {
 
 	if err := storage.StartWatcher(ctx, *zones, store, logger); err != nil {
 		logger.Error("failed to start zone file watcher", "directory", *zones, "error", err)
+		os.Exit(1)
+	}
+
+	fwAction, err := firewall.ParseBlockAction(*blockAction)
+	if err != nil {
+		logger.Error("invalid block-action configuration", "block_action", *blockAction, "error", err)
+		os.Exit(1)
+	}
+
+	fw := firewall.New(fwAction)
+	firewall.LoadFromDir(*blocklists, fw, logger)
+
+	if err := firewall.StartWatcher(ctx, *blocklists, fw, logger); err != nil {
+		logger.Error("failed to start blocklist watcher", "directory", *blocklists, "error", err)
 		os.Exit(1)
 	}
 
@@ -63,7 +80,7 @@ func main() {
 	}
 
 	forwarder := dnsproc.NewForwarder(upstreamAddrs, stats)
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl)
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw)
 
 	cfg := network.Config{
 		Address:          net.JoinHostPort(*listen, strconv.Itoa(*port)),
@@ -93,6 +110,8 @@ func main() {
 		"event_loops", cfg.ReusePortSockets,
 		"upstreams", upstreamAddrs,
 		"trusted_subnets", *trustedSubnets,
+		"blocklists", *blocklists,
+		"block_action", fwAction,
 	)
 	startReactor("udp", udpReactor.Run)
 	startReactor("tcp", tcpReactor.Run)
