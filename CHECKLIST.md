@@ -65,6 +65,7 @@
 
 - [ ] **Response Rate Limiting (RRL):** Mitigation of DNS amplification and reflection DDoS attacks via IP/subnet rate limits.
 - [ ] **Response Policy Zones (RPZ / DNS Firewall):** Real-time query matching against threat intelligence feeds (actions: Block, Drop, CNAME-Rewrite, NXDOMAIN).
+  - [x] Flat-file blocklist engine with reversed-domain radix prefix matching, subdomain blocking, `NXDOMAIN` / `ZEROIP` actions, fsnotify hot-reload, and `firewall_blocked` telemetry (Phase 11).
 - [x] **Access Control Lists (ACLs):** Granular definitions for:
   - [x] Authorized recursive clients (`-trusted-subnets`, REFUSED for untrusted RD queries) (Phase 09).
   - [ ] Authorized zone transfer (AXFR/IXFR) peers.
@@ -81,7 +82,7 @@
 ## 8. Management, Automation & Observability
 
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, and TCP read timeouts (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, and firewall-blocked queries (JSON-serializable snapshot for future API).
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
   - [ ] Latency histograms.
