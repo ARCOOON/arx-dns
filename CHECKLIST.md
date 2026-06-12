@@ -33,12 +33,13 @@
   - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
 - [ ] **Recursive / Resolver Mode:**
   - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
+  - [x] TTL-aware in-memory cache for forwarded upstream responses with hit/miss telemetry (Phase 08).
   - [ ] Full iterative resolution starting from root servers (`named.root`).
   - [ ] QNAME Minimization (RFC 7816) for enhanced privacy.
 - [ ] **Caching Engine:**
-  - [ ] Thread-safe, in-memory caching with strict TTL enforcement.
+  - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
   - [ ] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` responses.
-  - [ ] Lockless cache eviction strategies (LRU or LFU).
+  - [x] Lockless cache eviction strategies (LRU or LFU) via Ristretto TinyLFU (Phase 08).
   - [ ] Infrastructure caching (RTT tracking of upstream nameservers for optimal path selection).
 
 ## 4. Encrypted DNS & Security
@@ -53,7 +54,7 @@
 
 ## 5. Advanced Traffic Management & Routing
 
-- [ ] **Split-Horizon DNS:** Delivery of distinct zone views based on source IP ACLs (Internal vs. External).
+- [x] **Split-Horizon DNS:** Delivery of distinct zone views based on source IP ACLs (Internal vs. External) (Phase 09).
 - [ ] **GeoDNS / Topology Routing:** Location-based response resolution using GeoIP databases.
 - [ ] **EDNS Client Subnet (ECS - RFC 7871):** Forwarding and processing of client subnets during recursive queries for optimized CDN routing.
 - [ ] **Health Checking & Failover Engine:** Active probing of backend IPs (Ping, TCP, HTTP/HTTPS) with dynamic record adjustments when endpoints fail.
@@ -64,23 +65,23 @@
 
 - [ ] **Response Rate Limiting (RRL):** Mitigation of DNS amplification and reflection DDoS attacks via IP/subnet rate limits.
 - [ ] **Response Policy Zones (RPZ / DNS Firewall):** Real-time query matching against threat intelligence feeds (actions: Block, Drop, CNAME-Rewrite, NXDOMAIN).
-- [ ] **Access Control Lists (ACLs):** Granular definitions for:
-  - [ ] Authorized recursive clients.
+- [x] **Access Control Lists (ACLs):** Granular definitions for:
+  - [x] Authorized recursive clients (`-trusted-subnets`, REFUSED for untrusted RD queries) (Phase 09).
   - [ ] Authorized zone transfer (AXFR/IXFR) peers.
   - [ ] Management/API access.
 - [ ] **DNS Cookies (RFC 7873):** Protection against IP spoofing and cache poisoning attacks.
 
 ## 7. Storage Engine & Pluggable Backends
 
-- [x] **In-Memory Storage:** Thread-safe radix-tree store (`github.com/armon/go-radix`) for authoritative FQDN lookups (`A`, `AAAA`, `CNAME`) with `sync/atomic.Value` tree swapping for lock-free reads.
-- [x] **Zone Hot-Reload:** `fsnotify` watcher on the `-zones` directory with debounced full reload and structured `slog` logging.
+- [x] **In-Memory Storage:** Thread-safe dual-view radix-tree store (`github.com/armon/go-radix`) for authoritative FQDN lookups with separate public and internal views and `sync/atomic.Value` tree swapping for lock-free reads (Phase 09).
+- [x] **Zone Hot-Reload:** `fsnotify` watcher on the `-zones` directory and `zones/internal/` with debounced full reload and structured `slog` logging (Phase 09).
 - [ ] **Database Backends (Dynamic Zones):** Pluggable driver architecture for real-time relational (PostgreSQL, MySQL) and NoSQL/KV-Store (Redis, etcd) integration.
 - [ ] **Directory Integration:** LDAP/Active Directory bindings for automated IPAM (IP Address Management) synchronization.
 
 ## 8. Management, Automation & Observability
 
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
-- [ ] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, forwarded queries, and upstream failures (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, and cache hits/misses (JSON-serializable snapshot for future API).
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
   - [ ] Latency histograms.
