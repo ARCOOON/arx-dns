@@ -1,0 +1,11 @@
+# Binaries
+/arx-dns
+/bin/
+
+# Go
+*.exe
+*.test
+*.out
+
+# Phase working notes (not versioned)
+/phases/
