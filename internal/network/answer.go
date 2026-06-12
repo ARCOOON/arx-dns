@@ -3,19 +3,20 @@ package network
 import (
 	mdns "github.com/miekg/dns"
 
-	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
 
 func recordAnswer(stats *telemetry.Stats, response []byte) {
-	rcode, err := dnsproc.RcodeFromPayload(response)
-	if err != nil {
+	msg := new(mdns.Msg)
+	if err := msg.Unpack(response); err != nil {
 		return
 	}
-	switch rcode {
+	switch msg.Rcode {
 	case mdns.RcodeNameError:
 		stats.IncNXDomainAnswer()
-	default:
-		stats.IncAuthoritativeAnswer()
+	case mdns.RcodeSuccess:
+		if msg.Authoritative {
+			stats.IncAuthoritativeAnswer()
+		}
 	}
 }
