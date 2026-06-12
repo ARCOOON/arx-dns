@@ -18,6 +18,7 @@ type Config struct {
 	Server    ServerConfig    `toml:"server"`
 	TLS       TLSConfig       `toml:"tls"`
 	Listeners ListenersConfig `toml:"listeners"`
+	API       APIConfig       `toml:"api"`
 	Zones     ZonesConfig     `toml:"zones"`
 	Recursive RecursiveConfig `toml:"recursive"`
 	Firewall  FirewallConfig  `toml:"firewall"`
@@ -40,6 +41,12 @@ type TLSConfig struct {
 type ListenersConfig struct {
 	DoT string `toml:"dot"`
 	DoH string `toml:"doh"`
+}
+
+// APIConfig controls the management and telemetry HTTP API listener.
+type APIConfig struct {
+	Listen    string `toml:"listen"`
+	AuthToken string `toml:"auth_token"`
 }
 
 // ZonesConfig controls authoritative zone file storage.
@@ -69,6 +76,8 @@ const (
 	defaultBlockAction       = "NXDOMAIN"
 	defaultUpstreamPrimary   = "1.1.1.1:53"
 	defaultUpstreamSecondary = "1.0.0.1:53"
+	defaultAPIListen         = "127.0.0.1:8080"
+	defaultAPIAuthToken      = "dev-token-change-me"
 )
 
 // Default returns a Config populated with the same defaults as the legacy CLI flags.
@@ -82,6 +91,10 @@ func Default() Config {
 		Listeners: ListenersConfig{
 			DoT: defaultDoTListen,
 			DoH: defaultDoHListen,
+		},
+		API: APIConfig{
+			Listen:    defaultAPIListen,
+			AuthToken: defaultAPIAuthToken,
 		},
 		Zones: ZonesConfig{
 			Directory: defaultZonesDir,
@@ -188,6 +201,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Listeners.DoH) == "" {
 		c.Listeners.DoH = def.Listeners.DoH
 	}
+	if strings.TrimSpace(c.API.Listen) == "" {
+		c.API.Listen = def.API.Listen
+	}
+	if strings.TrimSpace(c.API.AuthToken) == "" {
+		c.API.AuthToken = def.API.AuthToken
+	}
 }
 
 // Validate checks that all configuration fields are usable at runtime.
@@ -216,7 +235,23 @@ func (c Config) Validate() error {
 	if err := c.validateTLS(); err != nil {
 		return err
 	}
+	if err := c.validateAPI(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (c Config) validateAPI() error {
+	if strings.TrimSpace(c.API.Listen) == "" {
+		return errors.New("api.listen must not be empty")
+	}
+	if _, err := net.ResolveTCPAddr("tcp", c.API.Listen); err != nil {
+		return fmt.Errorf("api.listen %q: %w", c.API.Listen, err)
+	}
+	if strings.TrimSpace(c.API.AuthToken) == "" {
+		return errors.New("api.auth_token must not be empty")
+	}
 	return nil
 }
 
