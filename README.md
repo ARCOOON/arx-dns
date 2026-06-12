@@ -19,7 +19,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                            |
 | `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                          |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, and source-IP ACL matching                                                                                          |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, and source-IP ACL matching                                                             |
 | `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, ACL enforcement, firewall interception, and upstream forwarding |
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                               |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                             |
@@ -50,22 +50,23 @@ dig @127.0.0.1 router.arx.local A
 
 ### Volume Layout
 
-| Host path            | Container path             | Purpose                      |
-| -------------------- | -------------------------- | ---------------------------- |
-| `./data/config.toml` | `/etc/arx-dns/config.toml` | TOML runtime configuration   |
-| `./data/zones/`      | `/etc/arx-dns/zones/`      | BIND `.zone` files           |
-| `./data/blocklists/` | `/etc/arx-dns/blocklists/` | Plain-text domain blocklists |
+| Host path            | Container path             | Purpose                                     |
+| -------------------- | -------------------------- | ------------------------------------------- |
+| `./data/config.toml` | `/etc/arx-dns/config.toml` | TOML runtime configuration                  |
+| `./data/zones/`      | `/etc/arx-dns/zones/`      | BIND `.zone` files                          |
+| `./data/blocklists/` | `/etc/arx-dns/blocklists/` | Plain-text domain blocklists                |
+| `./data/certs/`      | `/etc/arx-dns/certs/`      | TLS certificate and private key for DoT/DoH |
 
 The sample `data/config.toml` uses container paths (`/etc/arx-dns/zones`, `/etc/arx-dns/blocklists`). Edit zone and blocklist files on the host; `fsnotify` hot-reload picks up changes without restarting the container.
 
 ### Compose Service
 
-| Setting        | Value                                                     |
-| -------------- | --------------------------------------------------------- |
-| Ports          | `53/udp`, `53/tcp` published to the host                  |
-| Restart policy | `unless-stopped`                                          |
-| Capabilities   | `NET_ADMIN`, `NET_BIND_SERVICE` (port 53, `SO_REUSEPORT`) |
-| Entrypoint     | `/arx-dns -config /etc/arx-dns/config.toml`               |
+| Setting        | Value                                                                      |
+| -------------- | -------------------------------------------------------------------------- |
+| Ports          | `53/udp`, `53/tcp`, `853/tcp` (DoT), `443/tcp` (DoH) published to the host |
+| Restart policy | `unless-stopped`                                                           |
+| Capabilities   | `NET_ADMIN`, `NET_BIND_SERVICE` (port 53, `SO_REUSEPORT`)                  |
+| Entrypoint     | `/arx-dns -config /etc/arx-dns/config.toml`                                |
 
 ### Multi-Architecture Builds
 
@@ -110,6 +111,14 @@ trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
 [firewall]
 blocklists_directory = './blocklists'
 block_action = 'NXDOMAIN'
+
+[tls]
+cert_file = './certs/server.crt'
+key_file = './certs/server.key'
+
+[listeners]
+dot = ':853'
+doh = ':443'
 ```
 
 | Section / Key                   | Default                                       | Description                                                                                 |
@@ -117,6 +126,10 @@ block_action = 'NXDOMAIN'
 | `server.listen`                 | `0.0.0.0`                                     | IP address to bind to                                                                       |
 | `server.port`                   | `53`                                          | UDP/TCP port to listen on                                                                   |
 | `server.event_loops`            | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                      |
+| `tls.cert_file`                 | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH               |
+| `tls.key_file`                  | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH              |
+| `listeners.dot`                 | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                      |
+| `listeners.doh`                 | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                             |
 | `zones.directory`               | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
 | `recursive.upstreams`           | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
 | `recursive.trusted_subnets`     | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
@@ -208,6 +221,43 @@ dig @127.0.0.1 +norecurse secret.internal.zone A   # NXDOMAIN for untrusted clie
 
 Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational counters are logged as JSON on exit.
 
+### Encrypted DNS (DoT & DoH)
+
+When `tls.cert_file` and `tls.key_file` are set, arx-dns starts encrypted DNS listeners in addition to plain UDP/TCP on port 53.
+
+| Transport | Default bind | Protocol                      | Standard |
+| --------- | ------------ | ----------------------------- | -------- |
+| DoT       | `:853`       | TLS + length-prefixed TCP DNS | RFC 7858 |
+| DoH       | `:443`       | HTTPS `GET`/`POST /dns-query` | RFC 8484 |
+
+**DNS-over-TLS:** Clients connect with TLS (ALPN `dot`). Messages use the same 2-byte length prefix + DNS payload framing as TCP port 53. Responses are routed through `dnsproc.Processor.ResponseTCP` (no UDP truncation).
+
+**DNS-over-HTTPS:** The server exposes `/dns-query` only.
+
+- `POST /dns-query` — request body must use `Content-Type: application/dns-message`.
+- `GET /dns-query?dns=<base64url>` — wire-format query without padding per RFC 8484.
+
+Responses use `Content-Type: application/dns-message` and `Cache-Control: no-store`.
+
+Generate a development certificate:
+
+```bash
+mkdir -p data/certs
+openssl req -x509 -newkey rsa:2048 \
+  -keyout data/certs/server.key -out data/certs/server.crt \
+  -days 3650 -nodes -subj "/CN=arx-dns.local"
+```
+
+Verify:
+
+```bash
+dig @127.0.0.1 -p 853 +tls router.arx.local A
+curl -sk --data-binary @query.bin -H 'Content-Type: application/dns-message' \
+  https://127.0.0.1/dns-query -o response.bin
+```
+
+Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `config.toml`.
+
 ### Telemetry
 
 `internal/telemetry.Stats` tracks:
@@ -217,6 +267,8 @@ Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational count
 | `total_queries`         | Valid queries processed                                                 |
 | `udp_queries`           | UDP query count                                                         |
 | `tcp_queries`           | TCP query count                                                         |
+| `dot_queries`           | DNS-over-TLS query count                                                |
+| `doh_queries`           | DNS-over-HTTPS query count                                              |
 | `dropped_packets`       | Parse failures, invalid frames, and write errors                        |
 | `parse_errors`          | DNS unpack failures                                                     |
 | `write_errors`          | Response send failures                                                  |

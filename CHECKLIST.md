@@ -3,7 +3,7 @@
 ## 0. Project Scaffold & Tooling
 
 - [x] **Devcontainer:** Production-ready `.devcontainer/` with Go bookworm image, DNS utilities, port 53 UDP/TCP forwarding, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities.
-- [x] **Docker deployment (Phase 13):** Multi-stage `Dockerfile` (`golang:bookworm` builder, `scratch` runtime, `CGO_ENABLED=0`), `docker-compose.yml` with port 53 UDP/TCP, host `data/` volume mounts, `unless-stopped` restart, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities; Buildx-ready for `linux/amd64` and `linux/arm64`.
+- [x] **Docker deployment (Phase 13):** Multi-stage `Dockerfile` (`golang:bookworm` builder, `scratch` runtime, `CGO_ENABLED=0`), `docker-compose.yml` with ports 53 UDP/TCP, 853 TCP (DoT), and 443 TCP (DoH), host `data/` volume mounts including `./data/certs`, `unless-stopped` restart, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities; Buildx-ready for `linux/amd64` and `linux/arm64`.
 
 ## 1. Network Layer & Core I/O
 
@@ -45,8 +45,8 @@
 
 ## 4. Encrypted DNS & Security
 
-- [ ] **DNS-over-TLS (DoT):** Implementation via RFC 7858 using TLS 1.3 with session resumption.
-- [ ] **DNS-over-HTTPS (DoH):** Implementation via RFC 8484 (HTTP/2 and HTTP/3 support).
+- [x] **DNS-over-TLS (DoT):** RFC 7858 listener on configurable `:853` with TLS 1.2+, ALPN `dot`, and RFC 1035 length-prefixed TCP framing routed to `dnsproc.Processor` (Phase 14).
+- [x] **DNS-over-HTTPS (DoH):** RFC 8484 `GET`/`POST /dns-query` with `application/dns-message` on configurable `:443` over TLS (Phase 14).
 - [ ] **DNS-over-QUIC (DoQ):** Implementation via RFC 9250 for minimal latency and elimination of head-of-line blocking.
 - [ ] **DNSSEC Suite:**
   - [ ] On-the-fly cryptographic validation for recursive queries (chain of trust verification).
@@ -82,7 +82,7 @@
 
 ## 8. Management, Automation & Observability
 
-- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12).
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14).
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, and firewall-blocked queries (JSON-serializable snapshot for future API).
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
