@@ -18,6 +18,9 @@ type Stats struct {
 	nxdomainAnswers      atomic.Uint64
 	forwardedQueries     atomic.Uint64
 	upstreamFailures     atomic.Uint64
+	cacheHits            atomic.Uint64
+	cacheMisses          atomic.Uint64
+	aclRejected          atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -38,6 +41,9 @@ type Snapshot struct {
 	NXDomainAnswers      uint64 `json:"nxdomain_answers"`
 	ForwardedQueries     uint64 `json:"forwarded_queries"`
 	UpstreamFailures     uint64 `json:"upstream_failures"`
+	CacheHits            uint64 `json:"cache_hits"`
+	CacheMisses          uint64 `json:"cache_misses"`
+	ACLRejected          uint64 `json:"acl_rejected"`
 }
 
 // Snapshot returns the current counter values.
@@ -54,6 +60,9 @@ func (s *Stats) Snapshot() Snapshot {
 		NXDomainAnswers:      s.nxdomainAnswers.Load(),
 		ForwardedQueries:     s.forwardedQueries.Load(),
 		UpstreamFailures:     s.upstreamFailures.Load(),
+		CacheHits:            s.cacheHits.Load(),
+		CacheMisses:          s.cacheMisses.Load(),
+		ACLRejected:          s.aclRejected.Load(),
 	}
 }
 
@@ -108,4 +117,16 @@ func (s *Stats) IncForwardedQuery() {
 
 func (s *Stats) IncUpstreamFailure() {
 	s.upstreamFailures.Add(1)
+}
+
+func (s *Stats) IncCacheHit() {
+	s.cacheHits.Add(1)
+}
+
+func (s *Stats) IncCacheMiss() {
+	s.cacheMisses.Add(1)
+}
+
+func (s *Stats) IncACLRejected() {
+	s.aclRejected.Add(1)
 }
