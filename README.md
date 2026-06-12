@@ -32,6 +32,58 @@ go build -o arx-dns ./cmd/arx-dns/
 ./arx-dns   # reads ./config.toml (auto-created with defaults on first run)
 ```
 
+## Docker Deployment
+
+Production images use a multi-stage build (`CGO_ENABLED=0`, statically linked binary) and a `scratch` runtime stage for minimal memory footprint. Configuration, zones, and blocklists are mounted from the host at runtime.
+
+### Prerequisites
+
+- Docker Engine with Compose v2
+- Host port 53 available (stop conflicting DNS listeners before starting)
+
+### Quick Start
+
+```bash
+docker compose up -d --build
+dig @127.0.0.1 router.arx.local A
+```
+
+### Volume Layout
+
+| Host path            | Container path             | Purpose                      |
+| -------------------- | -------------------------- | ---------------------------- |
+| `./data/config.toml` | `/etc/arx-dns/config.toml` | TOML runtime configuration   |
+| `./data/zones/`      | `/etc/arx-dns/zones/`      | BIND `.zone` files           |
+| `./data/blocklists/` | `/etc/arx-dns/blocklists/` | Plain-text domain blocklists |
+
+The sample `data/config.toml` uses container paths (`/etc/arx-dns/zones`, `/etc/arx-dns/blocklists`). Edit zone and blocklist files on the host; `fsnotify` hot-reload picks up changes without restarting the container.
+
+### Compose Service
+
+| Setting        | Value                                                     |
+| -------------- | --------------------------------------------------------- |
+| Ports          | `53/udp`, `53/tcp` published to the host                  |
+| Restart policy | `unless-stopped`                                          |
+| Capabilities   | `NET_ADMIN`, `NET_BIND_SERVICE` (port 53, `SO_REUSEPORT`) |
+| Entrypoint     | `/arx-dns -config /etc/arx-dns/config.toml`               |
+
+### Multi-Architecture Builds
+
+Build and push images for `linux/amd64` and `linux/arm64` with Docker Buildx:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t arx-dns:latest \
+  --push .
+```
+
+Single-platform local build:
+
+```bash
+docker build -t arx-dns:latest .
+```
+
 ### Configuration
 
 All runtime settings are loaded from a single TOML file. The only CLI flag is `-config` (default: `./config.toml`). When the file does not exist, arx-dns writes a default configuration and continues startup.

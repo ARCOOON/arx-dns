@@ -3,6 +3,7 @@
 ## 0. Project Scaffold & Tooling
 
 - [x] **Devcontainer:** Production-ready `.devcontainer/` with Go bookworm image, DNS utilities, port 53 UDP/TCP forwarding, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities.
+- [x] **Docker deployment (Phase 13):** Multi-stage `Dockerfile` (`golang:bookworm` builder, `scratch` runtime, `CGO_ENABLED=0`), `docker-compose.yml` with port 53 UDP/TCP, host `data/` volume mounts, `unless-stopped` restart, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities; Buildx-ready for `linux/amd64` and `linux/arm64`.
 
 ## 1. Network Layer & Core I/O
 
