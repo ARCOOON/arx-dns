@@ -19,7 +19,7 @@
 - [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, and OPT echo in responses (Phase 10). EDNS options and Path MTU Discovery remain open.
 - [ ] **Comprehensive Record Type Support:** Native processing of:
   - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06).
-  - [ ] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS`.
+  - [~] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16).
 - [ ] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597).
 - [ ] **Compression Algorithm:** RFC-compliant message compression to minimize packet size.
 
@@ -49,7 +49,8 @@
 - [x] **DNS-over-HTTPS (DoH):** RFC 8484 `GET`/`POST /dns-query` with `application/dns-message` on configurable `:443` over TLS (Phase 14).
 - [ ] **DNS-over-QUIC (DoQ):** Implementation via RFC 9250 for minimal latency and elimination of head-of-line blocking.
 - [ ] **DNSSEC Suite:**
-  - [ ] On-the-fly cryptographic validation for recursive queries (chain of trust verification).
+  - [x] On-the-fly cryptographic validation for forwarded upstream responses (`RRSIG`/`DNSKEY` verification, AD bit, BOGUS → SERVFAIL) (Phase 16).
+  - [ ] Full chain-of-trust verification from root trust anchors.
   - [ ] Automated inline zone signing for authoritative mode (ZSK/KSK management).
   - [ ] NSEC/NSEC3 generation for authenticated denial of existence.
 
@@ -83,10 +84,10 @@
 
 ## 8. Management, Automation & Observability
 
-- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14).
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16).
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, and firewall-blocked queries (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, firewall-blocked queries, and DNSSEC validation pass/fail counters (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).

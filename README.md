@@ -15,16 +15,16 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                  | Purpose                                                                                                                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                            |
-| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                          |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, and source-IP ACL matching                                                             |
-| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, ACL enforcement, firewall interception, and upstream forwarding |
-| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                               |
-| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                             |
-| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                  |
-| `internal/api/`       | Management HTTP API for health checks, telemetry exposure, and zone reload                                                                                                      |
+| Path                  | Purpose                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                               |
+| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                             |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, and source-IP ACL matching                                                                                |
+| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
+| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                  |
+| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                     |
+| `internal/api/`       | Management HTTP API for health checks, telemetry exposure, and zone reload                                                                                                                         |
 
 ## Build & Run
 
@@ -113,6 +113,9 @@ trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
 blocklists_directory = './blocklists'
 block_action = 'NXDOMAIN'
 
+[security]
+dnssec_validation = true
+
 [tls]
 cert_file = './certs/server.crt'
 key_file = './certs/server.key'
@@ -142,6 +145,7 @@ auth_token = 'dev-token-change-me'
 | `recursive.trusted_subnets`     | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
 | `firewall.blocklists_directory` | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                     |
 | `firewall.block_action`         | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                 |
+| `security.dnssec_validation`    | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                |
 
 Example:
 
@@ -213,6 +217,8 @@ dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 
 When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`recursive.upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, and class. On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache using the minimum TTL across Answer and Authority records for eviction, then returned to the client. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
+When `security.dnssec_validation` is enabled (default), upstream requests include the EDNS **DO (DNSSEC OK)** bit so resolvers return `RRSIG` records alongside signed answers. If the response contains `RRSIG` records, arx-dns fetches the zone `DNSKEY` set from upstream and verifies each signature with `github.com/miekg/dns`. Successful validation sets the **AD (Authenticated Data)** bit on the client response. Cryptographic validation failures (BOGUS data) are logged as security warnings, counted in `dnssec_validations_failed`, and answered with `SERVFAIL` without caching the upstream payload.
+
 For `A` and `AAAA` queries, the processor follows CNAME chains automatically: each alias is appended to the Answer section and the target name is looked up for the originally requested type. Chains are limited to 8 hops with visited-name loop detection; loops or excessive depth return `SERVFAIL`. Direct `CNAME` queries return only the alias record without following the chain. All lookups read the active radix tree via `sync/atomic.Value` without locks.
 
 Verify with:
@@ -269,27 +275,29 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 
 `internal/telemetry.Stats` tracks:
 
-| Field                   | Description                                                             |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `total_queries`         | Valid queries processed                                                 |
-| `udp_queries`           | UDP query count                                                         |
-| `tcp_queries`           | TCP query count                                                         |
-| `dot_queries`           | DNS-over-TLS query count                                                |
-| `doh_queries`           | DNS-over-HTTPS query count                                              |
-| `dropped_packets`       | Parse failures, invalid frames, and write errors                        |
-| `parse_errors`          | DNS unpack failures                                                     |
-| `write_errors`          | Response send failures                                                  |
-| `refused_answers`       | REFUSED responses sent (ACL-denied recursion and other policy)          |
-| `authoritative_answers` | Authoritative NOERROR / NODATA responses                                |
-| `nxdomain_answers`      | NXDOMAIN responses sent                                                 |
-| `forwarded_queries`     | Recursive queries successfully forwarded upstream                       |
-| `upstream_failures`     | Recursive queries where all upstreams failed                            |
-| `cache_hits`            | Forwarded queries served from the response cache                        |
-| `cache_misses`          | Forwarded queries that missed the response cache                        |
-| `acl_rejected`          | Recursive queries denied because the client IP is untrusted             |
-| `truncated_responses`   | UDP responses truncated with TC set due to payload size limits          |
-| `tcp_timeouts`          | TCP connections closed for failing to send a complete DNS frame in time |
-| `firewall_blocked`      | Queries blocked by the DNS firewall blocklist engine                    |
+| Field                       | Description                                                             |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `total_queries`             | Valid queries processed                                                 |
+| `udp_queries`               | UDP query count                                                         |
+| `tcp_queries`               | TCP query count                                                         |
+| `dot_queries`               | DNS-over-TLS query count                                                |
+| `doh_queries`               | DNS-over-HTTPS query count                                              |
+| `dropped_packets`           | Parse failures, invalid frames, and write errors                        |
+| `parse_errors`              | DNS unpack failures                                                     |
+| `write_errors`              | Response send failures                                                  |
+| `refused_answers`           | REFUSED responses sent (ACL-denied recursion and other policy)          |
+| `authoritative_answers`     | Authoritative NOERROR / NODATA responses                                |
+| `nxdomain_answers`          | NXDOMAIN responses sent                                                 |
+| `forwarded_queries`         | Recursive queries successfully forwarded upstream                       |
+| `upstream_failures`         | Recursive queries where all upstreams failed                            |
+| `cache_hits`                | Forwarded queries served from the response cache                        |
+| `cache_misses`              | Forwarded queries that missed the response cache                        |
+| `acl_rejected`              | Recursive queries denied because the client IP is untrusted             |
+| `truncated_responses`       | UDP responses truncated with TC set due to payload size limits          |
+| `tcp_timeouts`              | TCP connections closed for failing to send a complete DNS frame in time |
+| `firewall_blocked`          | Queries blocked by the DNS firewall blocklist engine                    |
+| `dnssec_validations_passed` | Forwarded upstream responses that passed DNSSEC signature verification  |
+| `dnssec_validations_failed` | Forwarded upstream responses rejected as BOGUS after DNSSEC checks      |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`).
 
