@@ -11,9 +11,17 @@ import (
 
 	"github.com/armon/go-radix"
 	mdns "github.com/miekg/dns"
+
+	"github.com/ARCOOON/arx-dns/internal/config"
 )
 
 const internalViewDir = "internal"
+
+// LoadZones loads zone files from cfg.Directory into the public view and from
+// cfg.Directory/internal into the internal view, then atomically swaps both radix trees.
+func LoadZones(cfg config.ZonesConfig, store *Memory, logger *slog.Logger) {
+	LoadZonesFromDir(cfg.Directory, store, logger)
+}
 
 // LoadZonesFromDir loads zone files from dir into the public view and from
 // dir/internal into the internal view, then atomically swaps both radix trees.

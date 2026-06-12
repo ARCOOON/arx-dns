@@ -10,13 +10,19 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
+	"github.com/ARCOOON/arx-dns/internal/config"
 )
 
 const defaultReloadDebounce = 500 * time.Millisecond
 
-// StartWatcher watches dir and dir/internal for create, write, and remove events on
-// .zone files and hot-reloads both public and internal views atomically.
-func StartWatcher(ctx context.Context, dir string, store *Memory, logger *slog.Logger) error {
+// StartWatcher watches cfg.Directory and its internal subdirectory for create,
+// write, and remove events on .zone files and hot-reloads both views atomically.
+func StartWatcher(ctx context.Context, cfg config.ZonesConfig, store *Memory, logger *slog.Logger) error {
+	return startWatcher(ctx, cfg.Directory, store, logger)
+}
+
+func startWatcher(ctx context.Context, dir string, store *Memory, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
