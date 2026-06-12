@@ -36,9 +36,17 @@ func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCac
 	}
 }
 
-// Response parses a DNS query payload from client and returns an authoritative answer,
-// a forwarded recursive answer, or an appropriate error code.
+// Response parses a UDP DNS query and returns a response with EDNS0 truncation when needed.
 func (p *Processor) Response(client netip.Addr, payload []byte) ([]byte, error) {
+	return p.buildResponse(client, payload, true)
+}
+
+// ResponseTCP parses a TCP DNS query and returns a full response without UDP size truncation.
+func (p *Processor) ResponseTCP(client netip.Addr, payload []byte) ([]byte, error) {
+	return p.buildResponse(client, payload, false)
+}
+
+func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bool) ([]byte, error) {
 	if len(payload) < dnsHeaderSize || len(payload) > maxMessageSize {
 		return nil, mdns.ErrBuf
 	}
@@ -54,7 +62,7 @@ func (p *Processor) Response(client netip.Addr, payload []byte) ([]byte, error) 
 		resp.RecursionAvailable = true
 		resp.Authoritative = true
 		resp.Rcode = mdns.RcodeFormatError
-		return resp.Pack()
+		return p.packResponse(resp, req, limitUDP)
 	}
 
 	trusted := p.clientTrusted(client)
@@ -63,10 +71,10 @@ func (p *Processor) Response(client netip.Addr, payload []byte) ([]byte, error) 
 
 	if needsForward && req.RecursionDesired {
 		if !trusted {
-			return p.refusedResponse(req)
+			return p.refusedResponse(req, limitUDP)
 		}
 		if p.forwarder != nil {
-			return p.forwardQuery(req)
+			return p.forwardQuery(req, limitUDP)
 		}
 	}
 
@@ -76,7 +84,7 @@ func (p *Processor) Response(client netip.Addr, payload []byte) ([]byte, error) 
 	resp.RecursionAvailable = true
 	resp.Rcode = rcode
 	resp.Answer = records
-	return resp.Pack()
+	return p.packResponse(resp, req, limitUDP)
 }
 
 func (p *Processor) clientTrusted(client netip.Addr) bool {
@@ -86,7 +94,7 @@ func (p *Processor) clientTrusted(client netip.Addr) bool {
 	return p.acl.Trusted(client)
 }
 
-func (p *Processor) refusedResponse(req *mdns.Msg) ([]byte, error) {
+func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 	if p.stats != nil {
 		p.stats.IncACLRejected()
 	}
@@ -96,10 +104,10 @@ func (p *Processor) refusedResponse(req *mdns.Msg) ([]byte, error) {
 	resp.RecursionAvailable = true
 	resp.Authoritative = false
 	resp.Rcode = mdns.RcodeRefused
-	return resp.Pack()
+	return p.packResponse(resp, req, limitUDP)
 }
 
-func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
+func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 	key := storage.QuestionKey(req.Question[0])
 
 	if p.cache != nil {
@@ -109,7 +117,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
 			}
 			cached.SetReply(req)
 			cached.RecursionAvailable = true
-			return cached.Pack()
+			return p.packResponse(cached, req, limitUDP)
 		}
 		if p.stats != nil {
 			p.stats.IncCacheMiss()
@@ -123,7 +131,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
 		fallback.RecursionAvailable = true
 		fallback.Authoritative = false
 		fallback.Rcode = mdns.RcodeServerFailure
-		return fallback.Pack()
+		return p.packResponse(fallback, req, limitUDP)
 	}
 
 	if p.cache != nil {
@@ -132,6 +140,28 @@ func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
 
 	resp.SetReply(req)
 	resp.RecursionAvailable = true
+	return p.packResponse(resp, req, limitUDP)
+}
+
+// packResponse appends an EDNS0 OPT record when the request carried one, truncates UDP
+// responses to the negotiated payload size (512 bytes when EDNS0 is absent), and sets TC
+// when records are omitted.
+func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool) ([]byte, error) {
+	if opt := req.IsEdns0(); opt != nil {
+		resp.SetEdns0(opt.UDPSize(), opt.Do())
+	}
+
+	if limitUDP {
+		maxSize := mdns.MinMsgSize
+		if opt := req.IsEdns0(); opt != nil {
+			maxSize = int(opt.UDPSize())
+		}
+		resp.Truncate(maxSize)
+		if resp.Truncated && p.stats != nil {
+			p.stats.IncTruncatedResponse()
+		}
+	}
+
 	return resp.Pack()
 }
 

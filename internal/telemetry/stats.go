@@ -21,6 +21,8 @@ type Stats struct {
 	cacheHits            atomic.Uint64
 	cacheMisses          atomic.Uint64
 	aclRejected          atomic.Uint64
+	truncatedResponses   atomic.Uint64
+	tcpTimeouts          atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -44,6 +46,8 @@ type Snapshot struct {
 	CacheHits            uint64 `json:"cache_hits"`
 	CacheMisses          uint64 `json:"cache_misses"`
 	ACLRejected          uint64 `json:"acl_rejected"`
+	TruncatedResponses   uint64 `json:"truncated_responses"`
+	TCPTimeouts          uint64 `json:"tcp_timeouts"`
 }
 
 // Snapshot returns the current counter values.
@@ -63,6 +67,8 @@ func (s *Stats) Snapshot() Snapshot {
 		CacheHits:            s.cacheHits.Load(),
 		CacheMisses:          s.cacheMisses.Load(),
 		ACLRejected:          s.aclRejected.Load(),
+		TruncatedResponses:   s.truncatedResponses.Load(),
+		TCPTimeouts:          s.tcpTimeouts.Load(),
 	}
 }
 
@@ -129,4 +135,12 @@ func (s *Stats) IncCacheMiss() {
 
 func (s *Stats) IncACLRejected() {
 	s.aclRejected.Add(1)
+}
+
+func (s *Stats) IncTruncatedResponse() {
+	s.truncatedResponses.Add(1)
+}
+
+func (s *Stats) IncTCPTimeout() {
+	s.tcpTimeouts.Add(1)
 }

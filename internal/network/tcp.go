@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"log/slog"
+	"sync"
+	"time"
 
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
@@ -13,13 +15,24 @@ import (
 const (
 	maxDNSMessageSize = 65535
 	tcpLengthPrefix   = 2
+
+	tcpKeepAlive    = 3 * time.Minute
+	tcpKeepInterval = 30 * time.Second
+	tcpKeepCount    = 3
+	tcpReadTimeout  = 3 * time.Second
+	tcpTimeoutTick  = 500 * time.Millisecond
 )
+
+type tcpConnState struct {
+	deadline time.Time
+}
 
 // TCPReactor serves DNS over TCP using a gnet event-driven reactor.
 type TCPReactor struct {
 	reactor
 	stats *telemetry.Stats
 	proc  *dnsproc.Processor
+	conns sync.Map
 }
 
 // NewTCPReactor creates a TCP reactor for the given configuration.
@@ -47,11 +60,62 @@ func (r *TCPReactor) Run(ctx context.Context) error {
 	return runReactor(ctx, r.cfg, "tcp", r, r.logger, r.gnetOptions()...)
 }
 
+func (r *TCPReactor) gnetOptions() []gnet.Option {
+	opts := r.reactor.gnetOptions()
+	return append(opts,
+		gnet.WithTCPKeepAlive(tcpKeepAlive),
+		gnet.WithTCPKeepInterval(tcpKeepInterval),
+		gnet.WithTCPKeepCount(tcpKeepCount),
+		gnet.WithTicker(true),
+	)
+}
+
 func (r *TCPReactor) OnOpen(c gnet.Conn) ([]byte, gnet.Action) {
+	state := &tcpConnState{deadline: time.Now().Add(tcpReadTimeout)}
+	c.SetContext(state)
+	r.conns.Store(c, state)
 	return nil, gnet.None
 }
 
+func (r *TCPReactor) OnClose(c gnet.Conn, _ error) (action gnet.Action) {
+	r.conns.Delete(c)
+	return gnet.None
+}
+
+func (r *TCPReactor) OnTick() (delay time.Duration, action gnet.Action) {
+	now := time.Now()
+	r.conns.Range(func(key, value any) bool {
+		c, ok := key.(gnet.Conn)
+		if !ok {
+			return true
+		}
+		state, ok := value.(*tcpConnState)
+		if !ok {
+			return true
+		}
+		if now.After(state.deadline) {
+			r.stats.IncTCPTimeout()
+			_ = c.Close()
+			r.conns.Delete(c)
+		}
+		return true
+	})
+	return tcpTimeoutTick, gnet.None
+}
+
 func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
+	state, ok := c.Context().(*tcpConnState)
+	if !ok {
+		state = &tcpConnState{deadline: time.Now().Add(tcpReadTimeout)}
+		c.SetContext(state)
+		r.conns.Store(c, state)
+	}
+
+	if time.Now().After(state.deadline) {
+		r.stats.IncTCPTimeout()
+		return gnet.Close
+	}
+
 	for {
 		buffered := c.InboundBuffered()
 		if buffered < tcpLengthPrefix {
@@ -92,10 +156,11 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 		}
 
 		client := ClientIPFromAddr(c.RemoteAddr())
-		response, err := r.proc.Response(client, payload)
+		response, err := r.proc.ResponseTCP(client, payload)
 		if err != nil {
 			r.logger.Debug("tcp parse failed", "error", err, "bytes", len(payload))
 			r.stats.IncParseError()
+			state.deadline = time.Now().Add(tcpReadTimeout)
 			continue
 		}
 
@@ -111,5 +176,6 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 
 		r.stats.IncTCPQuery()
 		recordAnswer(r.stats, response)
+		state.deadline = time.Now().Add(tcpReadTimeout)
 	}
 }
