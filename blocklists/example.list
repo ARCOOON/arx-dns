@@ -1,0 +1,5 @@
+# Example blocklist for arx-dns (one domain per line).
+# Lines starting with # and blank lines are ignored.
+# Blocking example.com also blocks all subdomains (e.g. ads.example.com).
+
+doubleclick.net
