@@ -1,0 +1,18 @@
+services:
+  arx-dns:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: arx-dns:latest
+    container_name: arx-dns
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    volumes:
+      - ./data/config.toml:/etc/arx-dns/config.toml:ro
+      - ./data/zones:/etc/arx-dns/zones:ro
+      - ./data/blocklists:/etc/arx-dns/blocklists:ro
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE

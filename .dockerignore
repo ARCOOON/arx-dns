@@ -1,0 +1,11 @@
+.git
+.gitignore
+.devcontainer
+phases
+arx-dns
+bin
+*.md
+config.toml
+data
+.dockerignore
+docker-compose.yml
