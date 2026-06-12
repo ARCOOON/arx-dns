@@ -15,13 +15,13 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                  | Purpose                                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)                         |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind                           |
-| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, and CNAME chain resolution |
-| `internal/storage/`   | Thread-safe in-memory radix-tree zone store, BIND zone loader, and fsnotify hot-reload  |
-| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                          |
+| Path                  | Purpose                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)                                              |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind                                                |
+| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, CNAME chain resolution, and upstream forwarding |
+| `internal/storage/`   | Thread-safe in-memory radix-tree zone store, BIND zone loader, and fsnotify hot-reload                       |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                               |
 
 ## Build & Run
 
@@ -32,12 +32,13 @@ go build -o arx-dns ./cmd/arx-dns/
 
 ### CLI Flags
 
-| Flag      | Default   | Description                                            |
-| --------- | --------- | ------------------------------------------------------ |
-| `-listen` | `0.0.0.0` | IP address to bind to                                  |
-| `-port`   | `53`      | UDP/TCP port to listen on                              |
-| `-loops`  | `0`       | gnet event loops per protocol (`0` = one per CPU core) |
-| `-zones`  | `./zones` | Directory containing BIND `.zone` files                |
+| Flag         | Default                 | Description                                                     |
+| ------------ | ----------------------- | --------------------------------------------------------------- |
+| `-listen`    | `0.0.0.0`               | IP address to bind to                                           |
+| `-port`      | `53`                    | UDP/TCP port to listen on                                       |
+| `-loops`     | `0`                     | gnet event loops per protocol (`0` = one per CPU core)          |
+| `-zones`     | `./zones`               | Directory containing BIND `.zone` files                         |
+| `-upstreams` | `1.1.1.1:53,1.0.0.1:53` | Comma-separated upstream DNS resolvers for recursive forwarding |
 
 Example:
 
@@ -57,7 +58,9 @@ The default `zones/arx.local.zone` ships a small demo zone for immediate testing
 | `router.arx.local` | AAAA  | `fd00::1`          |
 | `www.arx.local`    | CNAME | `router.arx.local` |
 
-Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
+Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown and recursion is not requested, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
+
+When a query is not found in the local zone store and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`-upstreams`). Upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is returned to the client. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
 For `A` and `AAAA` queries, the processor follows CNAME chains automatically: each alias is appended to the Answer section and the target name is looked up for the originally requested type. Chains are limited to 8 hops with visited-name loop detection; loops or excessive depth return `SERVFAIL`. Direct `CNAME` queries return only the alias record without following the chain. All lookups read the active radix tree via `sync/atomic.Value` without locks.
 
@@ -67,7 +70,8 @@ Verify with:
 dig @127.0.0.1 router.arx.local A
 dig @127.0.0.1 www.arx.local A          # CNAME + resolved A in one response
 dig @127.0.0.1 www.arx.local CNAME +tcp
-dig @127.0.0.1 unknown.example.com A   # NXDOMAIN
+dig @127.0.0.1 unknown.example.com A   # NXDOMAIN (no RD flag)
+dig @127.0.0.1 +recurse example.com A   # forwarded to upstream resolvers
 ```
 
 Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational counters are logged as JSON on exit.
@@ -76,17 +80,19 @@ Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational count
 
 `internal/telemetry.Stats` tracks:
 
-| Field                   | Description                                      |
-| ----------------------- | ------------------------------------------------ |
-| `total_queries`         | Valid queries processed                          |
-| `udp_queries`           | UDP query count                                  |
-| `tcp_queries`           | TCP query count                                  |
-| `dropped_packets`       | Parse failures, invalid frames, and write errors |
-| `parse_errors`          | DNS unpack failures                              |
-| `write_errors`          | Response send failures                           |
-| `refused_answers`       | REFUSED responses sent (reserved for future use) |
-| `authoritative_answers` | Authoritative NOERROR / NODATA responses         |
-| `nxdomain_answers`      | NXDOMAIN responses sent                          |
+| Field                   | Description                                       |
+| ----------------------- | ------------------------------------------------- |
+| `total_queries`         | Valid queries processed                           |
+| `udp_queries`           | UDP query count                                   |
+| `tcp_queries`           | TCP query count                                   |
+| `dropped_packets`       | Parse failures, invalid frames, and write errors  |
+| `parse_errors`          | DNS unpack failures                               |
+| `write_errors`          | Response send failures                            |
+| `refused_answers`       | REFUSED responses sent (reserved for future use)  |
+| `authoritative_answers` | Authoritative NOERROR / NODATA responses          |
+| `nxdomain_answers`      | NXDOMAIN responses sent                           |
+| `forwarded_queries`     | Recursive queries successfully forwarded upstream |
+| `upstream_failures`     | Recursive queries where all upstreams failed      |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs for a future management API.
 

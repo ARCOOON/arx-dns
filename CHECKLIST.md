@@ -32,6 +32,7 @@
   - [ ] Dynamic Updates (RFC 2136) secured via TSIG.
   - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
 - [ ] **Recursive / Resolver Mode:**
+  - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
   - [ ] Full iterative resolution starting from root servers (`named.root`).
   - [ ] QNAME Minimization (RFC 7816) for enhanced privacy.
 - [ ] **Caching Engine:**
@@ -79,7 +80,7 @@
 ## 8. Management, Automation & Observability
 
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
-- [ ] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, and REFUSED answers (JSON-serializable snapshot for future API).
+- [ ] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, forwarded queries, and upstream failures (JSON-serializable snapshot for future API).
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
   - [ ] Latency histograms.
