@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+
+	"github.com/ARCOOON/arx-dns/internal/config"
 )
 
 // ACL holds trusted CIDR prefixes for recursive query authorization.
@@ -34,6 +36,15 @@ func ParseACL(csv string) (*ACL, error) {
 	}
 
 	return &ACL{prefixes: prefixes}, nil
+}
+
+// ACLFromConfig builds the recursive-query ACL from application configuration.
+func ACLFromConfig(cfg config.Config) (*ACL, error) {
+	csv, err := cfg.TrustedSubnetsCSV()
+	if err != nil {
+		return nil, err
+	}
+	return ParseACL(csv)
 }
 
 // Trusted returns true when addr falls within any configured prefix.
