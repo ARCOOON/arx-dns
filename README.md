@@ -15,13 +15,13 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                  | Purpose                                                          |
-| --------------------- | ---------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)  |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind    |
-| `internal/dnsproc/`   | DNS message parse/serialize and authoritative response builder   |
-| `internal/storage/`   | Thread-safe in-memory radix-tree zone store, BIND zone loader, and fsnotify hot-reload |
-| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats   |
+| Path                  | Purpose                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)                         |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind                           |
+| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, and CNAME chain resolution |
+| `internal/storage/`   | Thread-safe in-memory radix-tree zone store, BIND zone loader, and fsnotify hot-reload  |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                          |
 
 ## Build & Run
 
@@ -59,10 +59,13 @@ The default `zones/arx.local.zone` ships a small demo zone for immediate testing
 
 Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
 
+For `A` and `AAAA` queries, the processor follows CNAME chains automatically: each alias is appended to the Answer section and the target name is looked up for the originally requested type. Chains are limited to 8 hops with visited-name loop detection; loops or excessive depth return `SERVFAIL`. Direct `CNAME` queries return only the alias record without following the chain. All lookups read the active radix tree via `sync/atomic.Value` without locks.
+
 Verify with:
 
 ```bash
 dig @127.0.0.1 router.arx.local A
+dig @127.0.0.1 www.arx.local A          # CNAME + resolved A in one response
 dig @127.0.0.1 www.arx.local CNAME +tcp
 dig @127.0.0.1 unknown.example.com A   # NXDOMAIN
 ```

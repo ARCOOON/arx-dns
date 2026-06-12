@@ -17,7 +17,7 @@
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
 - [ ] **EDNS0 Support (RFC 6891):** Handling of extended payload sizes (>512 bytes), EDNS options, and Path MTU Discovery.
 - [ ] **Comprehensive Record Type Support:** Native processing of:
-  - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03).
+  - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06).
   - [ ] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS`.
 - [ ] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597).
 - [ ] **Compression Algorithm:** RFC-compliant message compression to minimize packet size.
@@ -26,6 +26,7 @@
 
 - [ ] **Authoritative Mode:**
   - [x] In-memory authoritative resolution with radix-tree storage and NXDOMAIN for unknown names (Phase 03).
+  - [x] CNAME chain following for `A`/`AAAA` queries with loop protection and depth limit (Phase 06).
   - [x] Parsing and validation of standard BIND zone files (Phase 04).
   - [x] fsnotify hot-reload with atomic radix-tree swapping and 500ms debounce (Phase 05).
   - [ ] Dynamic Updates (RFC 2136) secured via TSIG.
