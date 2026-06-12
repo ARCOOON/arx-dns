@@ -20,7 +20,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)  |
 | `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind    |
 | `internal/dnsproc/`   | DNS message parse/serialize and authoritative response builder   |
-| `internal/storage/`   | Thread-safe in-memory radix-tree zone store and BIND zone loader |
+| `internal/storage/`   | Thread-safe in-memory radix-tree zone store, BIND zone loader, and fsnotify hot-reload |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats   |
 
 ## Build & Run
@@ -46,6 +46,8 @@ Example:
 ```
 
 On startup, all `*.zone` files in the zones directory are loaded into the in-memory radix tree. The zone apex is taken from the filename (e.g. `arx.local.zone` → origin `arx.local.`) or from a `$ORIGIN` directive inside the file. Malformed zone files are logged and skipped; the server continues with the remaining zones.
+
+While the server is running, `fsnotify` watches the zones directory for `Create`, `Write`, and `Remove` events on `.zone` files. Changes are debounced for 500ms (to allow atomic file writes to finish), then all zone files are re-parsed into a brand-new radix tree and swapped in atomically via `sync/atomic.Value`. Lookups remain lock-free on the active tree pointer; reload events log the number of loaded zones and any parse errors as structured JSON.
 
 The default `zones/arx.local.zone` ships a small demo zone for immediate testing:
 

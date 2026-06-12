@@ -27,6 +27,7 @@
 - [ ] **Authoritative Mode:**
   - [x] In-memory authoritative resolution with radix-tree storage and NXDOMAIN for unknown names (Phase 03).
   - [x] Parsing and validation of standard BIND zone files (Phase 04).
+  - [x] fsnotify hot-reload with atomic radix-tree swapping and 500ms debounce (Phase 05).
   - [ ] Dynamic Updates (RFC 2136) secured via TSIG.
   - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
 - [ ] **Recursive / Resolver Mode:**
@@ -69,7 +70,8 @@
 
 ## 7. Storage Engine & Pluggable Backends
 
-- [x] **In-Memory Storage:** Thread-safe radix-tree store (`github.com/armon/go-radix`) for authoritative FQDN lookups (`A`, `AAAA`, `CNAME`).
+- [x] **In-Memory Storage:** Thread-safe radix-tree store (`github.com/armon/go-radix`) for authoritative FQDN lookups (`A`, `AAAA`, `CNAME`) with `sync/atomic.Value` tree swapping for lock-free reads.
+- [x] **Zone Hot-Reload:** `fsnotify` watcher on the `-zones` directory with debounced full reload and structured `slog` logging.
 - [ ] **Database Backends (Dynamic Zones):** Pluggable driver architecture for real-time relational (PostgreSQL, MySQL) and NoSQL/KV-Store (Redis, etcd) integration.
 - [ ] **Directory Integration:** LDAP/Active Directory bindings for automated IPAM (IP Address Management) synchronization.
 
