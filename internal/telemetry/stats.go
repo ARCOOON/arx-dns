@@ -16,6 +16,8 @@ type Stats struct {
 	refusedAnswers       atomic.Uint64
 	authoritativeAnswers atomic.Uint64
 	nxdomainAnswers      atomic.Uint64
+	forwardedQueries     atomic.Uint64
+	upstreamFailures     atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -34,6 +36,8 @@ type Snapshot struct {
 	RefusedAnswers       uint64 `json:"refused_answers"`
 	AuthoritativeAnswers uint64 `json:"authoritative_answers"`
 	NXDomainAnswers      uint64 `json:"nxdomain_answers"`
+	ForwardedQueries     uint64 `json:"forwarded_queries"`
+	UpstreamFailures     uint64 `json:"upstream_failures"`
 }
 
 // Snapshot returns the current counter values.
@@ -48,6 +52,8 @@ func (s *Stats) Snapshot() Snapshot {
 		RefusedAnswers:       s.refusedAnswers.Load(),
 		AuthoritativeAnswers: s.authoritativeAnswers.Load(),
 		NXDomainAnswers:      s.nxdomainAnswers.Load(),
+		ForwardedQueries:     s.forwardedQueries.Load(),
+		UpstreamFailures:     s.upstreamFailures.Load(),
 	}
 }
 
@@ -94,4 +100,12 @@ func (s *Stats) IncAuthoritativeAnswer() {
 
 func (s *Stats) IncNXDomainAnswer() {
 	s.nxdomainAnswers.Add(1)
+}
+
+func (s *Stats) IncForwardedQuery() {
+	s.forwardedQueries.Add(1)
+}
+
+func (s *Stats) IncUpstreamFailure() {
+	s.upstreamFailures.Add(1)
 }
