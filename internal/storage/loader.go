@@ -52,20 +52,7 @@ func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 	)
 }
 
-// buildViewsFromDir constructs fresh public and internal radix trees from root.
-func buildViewsFromDir(root string, logger *slog.Logger) (public, internal *radix.Tree, publicLoaded, publicSkipped, internalLoaded, internalSkipped int) {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	public, publicLoaded, publicSkipped = buildTreeFromDir(root, logger)
-	internal, internalLoaded, internalSkipped = buildTreeFromDir(filepath.Join(root, internalViewDir), logger)
-	if internal == nil {
-		internal = radix.New()
-	}
-	return public, internal, publicLoaded, publicSkipped, internalLoaded, internalSkipped
-}
-
+// buildTreeFromDir reads *.zone files from dir and returns a radix tree.
 func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

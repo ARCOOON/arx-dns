@@ -61,22 +61,7 @@ func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, stor
 		timer  *time.Timer
 		reload = func(trigger string) {
 			logger.Info("zone reload triggered", "directory", dir, "trigger", trigger)
-
-			publicTree, internalTree, publicLoaded, publicSkipped, internalLoaded, internalSkipped := buildViewsFromDir(dir, logger)
-			if publicTree == nil {
-				logger.Warn("zone reload skipped; public directory unavailable", "directory", dir)
-				return
-			}
-
-			store.SwapPublicTree(publicTree)
-			store.SwapInternalTree(internalTree)
-			logger.Info("zone reload complete",
-				"directory", dir,
-				"public_loaded", publicLoaded,
-				"public_skipped", publicSkipped,
-				"internal_loaded", internalLoaded,
-				"internal_skipped", internalSkipped,
-			)
+			LoadZonesFromDir(dir, store, logger)
 		}
 		scheduleReload = func(trigger string) {
 			mu.Lock()
