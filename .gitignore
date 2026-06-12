@@ -9,3 +9,4 @@
 
 # Phase working notes (not versioned)
 /phases/
+/**/*_test.go
