@@ -67,7 +67,7 @@
 - [ ] **Response Policy Zones (RPZ / DNS Firewall):** Real-time query matching against threat intelligence feeds (actions: Block, Drop, CNAME-Rewrite, NXDOMAIN).
   - [x] Flat-file blocklist engine with reversed-domain radix prefix matching, subdomain blocking, `NXDOMAIN` / `ZEROIP` actions, fsnotify hot-reload, and `firewall_blocked` telemetry (Phase 11).
 - [x] **Access Control Lists (ACLs):** Granular definitions for:
-  - [x] Authorized recursive clients (`-trusted-subnets`, REFUSED for untrusted RD queries) (Phase 09).
+  - [x] Authorized recursive clients (`recursive.trusted_subnets`, REFUSED for untrusted RD queries) (Phase 09).
   - [ ] Authorized zone transfer (AXFR/IXFR) peers.
   - [ ] Management/API access.
 - [ ] **DNS Cookies (RFC 7873):** Protection against IP spoofing and cache poisoning attacks.
@@ -75,12 +75,13 @@
 ## 7. Storage Engine & Pluggable Backends
 
 - [x] **In-Memory Storage:** Thread-safe dual-view radix-tree store (`github.com/armon/go-radix`) for authoritative FQDN lookups with separate public and internal views and `sync/atomic.Value` tree swapping for lock-free reads (Phase 09).
-- [x] **Zone Hot-Reload:** `fsnotify` watcher on the `-zones` directory and `zones/internal/` with debounced full reload and structured `slog` logging (Phase 09).
+- [x] **Zone Hot-Reload:** `fsnotify` watcher on the zones directory and `zones/internal/` with debounced full reload and structured `slog` logging (Phase 09).
 - [ ] **Database Backends (Dynamic Zones):** Pluggable driver architecture for real-time relational (PostgreSQL, MySQL) and NoSQL/KV-Store (Redis, etcd) integration.
 - [ ] **Directory Integration:** LDAP/Active Directory bindings for automated IPAM (IP Address Management) synchronization.
 
 ## 8. Management, Automation & Observability
 
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12).
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, and firewall-blocked queries (JSON-serializable snapshot for future API).
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:

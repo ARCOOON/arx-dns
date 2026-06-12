@@ -17,7 +17,8 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 | Path                  | Purpose                                                                                                                                                                         |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)                                                                                                                 |
+| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                            |
+| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                          |
 | `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, and source-IP ACL matching                                                                                          |
 | `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, ACL enforcement, firewall interception, and upstream forwarding |
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                               |
@@ -28,26 +29,52 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ```bash
 go build -o arx-dns ./cmd/arx-dns/
-./arx-dns   # binds 0.0.0.0:53 by default (use sudo or devcontainer for port 53)
+./arx-dns   # reads ./config.toml (auto-created with defaults on first run)
 ```
 
-### CLI Flags
+### Configuration
 
-| Flag               | Default                                 | Description                                                                                 |
-| ------------------ | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `-listen`          | `0.0.0.0`                               | IP address to bind to                                                                       |
-| `-port`            | `53`                                    | UDP/TCP port to listen on                                                                   |
-| `-loops`           | `0`                                     | gnet event loops per protocol (`0` = one per CPU core)                                      |
-| `-zones`           | `./zones`                               | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
-| `-upstreams`       | `1.1.1.1:53,1.0.0.1:53`                 | Comma-separated upstream DNS resolvers for recursive forwarding                             |
-| `-trusted-subnets` | `127.0.0.0/8,10.0.0.0/8,192.168.0.0/16` | Comma-separated CIDR prefixes allowed to use recursive forwarding                           |
-| `-blocklists`      | `./blocklists`                          | Directory containing plain-text domain blocklists (one domain per line)                     |
-| `-block-action`    | `NXDOMAIN`                              | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                 |
+All runtime settings are loaded from a single TOML file. The only CLI flag is `-config` (default: `./config.toml`). When the file does not exist, arx-dns writes a default configuration and continues startup.
+
+| Flag      | Default         | Description                         |
+| --------- | --------------- | ----------------------------------- |
+| `-config` | `./config.toml` | Path to the TOML configuration file |
+
+Example `config.toml` (generated automatically on first run):
+
+```toml
+[server]
+listen = '0.0.0.0'
+port = 53
+event_loops = 0
+
+[zones]
+directory = './zones'
+
+[recursive]
+upstreams = ['1.1.1.1:53', '1.0.0.1:53']
+trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
+
+[firewall]
+blocklists_directory = './blocklists'
+block_action = 'NXDOMAIN'
+```
+
+| Section / Key                   | Default                                       | Description                                                                                 |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `server.listen`                 | `0.0.0.0`                                     | IP address to bind to                                                                       |
+| `server.port`                   | `53`                                          | UDP/TCP port to listen on                                                                   |
+| `server.event_loops`            | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                      |
+| `zones.directory`               | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
+| `recursive.upstreams`           | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
+| `recursive.trusted_subnets`     | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
+| `firewall.blocklists_directory` | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                     |
+| `firewall.block_action`         | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                 |
 
 Example:
 
 ```bash
-./arx-dns -listen 127.0.0.1 -port 5353 -loops 4 -zones ./zones
+./arx-dns -config /etc/arx-dns/config.toml
 ```
 
 On startup, all `*.zone` files in the zones directory root are loaded into the **public** view. Additional zone files placed in `zones/internal/` are loaded into a separate **internal** view. The zone apex is taken from the filename (e.g. `arx.local.zone` → origin `arx.local.`) or from a `$ORIGIN` directive inside the file. Malformed zone files are logged and skipped; the server continues with the remaining zones.
@@ -74,25 +101,25 @@ The TCP reactor enables kernel keep-alive probes (`WithTCPKeepAlive`, 3-minute i
 
 ### Split-DNS views
 
-| View       | Directory                | Visibility                                |
-| ---------- | ------------------------ | ----------------------------------------- |
-| `public`   | `-zones/*.zone`          | All clients                               |
-| `internal` | `-zones/internal/*.zone` | Trusted clients only (`-trusted-subnets`) |
+| View       | Directory               | Visibility                                         |
+| ---------- | ----------------------- | -------------------------------------------------- |
+| `public`   | `zones/*.zone`          | All clients                                        |
+| `internal` | `zones/internal/*.zone` | Trusted clients only (`recursive.trusted_subnets`) |
 
-Trusted clients (source IP matches `-trusted-subnets`) query the **internal** view first. On `NXDOMAIN`, the processor falls back to the **public** view. Untrusted clients query only the public view.
+Trusted clients (source IP matches `recursive.trusted_subnets`) query the **internal** view first. On `NXDOMAIN`, the processor falls back to the **public** view. Untrusted clients query only the public view.
 
 ### Access control (ACL)
 
-Clients whose source IP does **not** match `-trusted-subnets` may query authoritative public zones only. If such a client sets the **Recursion Desired (RD)** flag for a name outside local zones, the server returns **REFUSED** instead of forwarding upstream. Trusted clients may use recursive forwarding as before.
+Clients whose source IP does **not** match `recursive.trusted_subnets` may query authoritative public zones only. If such a client sets the **Recursion Desired (RD)** flag for a name outside local zones, the server returns **REFUSED** instead of forwarding upstream. Trusted clients may use recursive forwarding as before.
 
 ### DNS firewall (blocklists)
 
-Before cache or authoritative resolution, every query is checked against blocklists loaded from `-blocklists`. Domains are stored in a reversed-label radix tree (`example.com` → `com.example`) so blocking an apex also blocks all subdomains (e.g. `ads.example.com`).
+Before cache or authoritative resolution, every query is checked against blocklists loaded from `firewall.blocklists_directory`. Domains are stored in a reversed-label radix tree (`example.com` → `com.example`) so blocking an apex also blocks all subdomains (e.g. `ads.example.com`).
 
-| Flag            | Default        | Behavior                                                                                |
-| --------------- | -------------- | --------------------------------------------------------------------------------------- |
-| `-blocklists`   | `./blocklists` | Directory of flat text files; one domain per line; `#` comments and blank lines ignored |
-| `-block-action` | `NXDOMAIN`     | `NXDOMAIN` returns RCODE 3; `ZEROIP` returns `A` → `0.0.0.0` or `AAAA` → `::`           |
+| Key                             | Default        | Behavior                                                                                |
+| ------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `firewall.blocklists_directory` | `./blocklists` | Directory of flat text files; one domain per line; `#` comments and blank lines ignored |
+| `firewall.block_action`         | `NXDOMAIN`     | `NXDOMAIN` returns RCODE 3; `ZEROIP` returns `A` → `0.0.0.0` or `AAAA` → `::`           |
 
 Blocklist files are hot-reloaded via `fsnotify` with the same 500ms debounce and atomic tree swap pattern as zone files. Firewall matches take precedence over authoritative zones and the upstream cache.
 
@@ -108,11 +135,11 @@ Verify blocking:
 
 ```bash
 dig @127.0.0.1 +short ads.example.com A    # NXDOMAIN (default)
-./arx-dns -block-action ZEROIP ...
+# Set firewall.block_action = "ZEROIP" in config.toml, then:
 dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 ```
 
-When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`-upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, and class. On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache using the minimum TTL across Answer and Authority records for eviction, then returned to the client. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
+When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`recursive.upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, and class. On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache using the minimum TTL across Answer and Authority records for eviction, then returned to the client. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
 For `A` and `AAAA` queries, the processor follows CNAME chains automatically: each alias is appended to the Answer section and the target name is looked up for the originally requested type. Chains are limited to 8 hops with visited-name loop detection; loops or excessive depth return `SERVFAIL`. Direct `CNAME` queries return only the alias record without following the chain. All lookups read the active radix tree via `sync/atomic.Value` without locks.
 
