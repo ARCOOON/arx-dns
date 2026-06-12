@@ -20,31 +20,51 @@ const (
 	LookupFound
 )
 
-// Memory is a thread-safe in-memory authoritative zone store backed by a radix tree.
-// Lookups load the active tree pointer atomically for lock-free reads; reloads build a
-// new tree in the background and swap it in with atomic.Value.
+// Memory is a thread-safe in-memory authoritative zone store backed by separate
+// radix trees for public and internal split-DNS views. Lookups load the active
+// tree pointer atomically for lock-free reads; reloads build new trees in the
+// background and swap them in with atomic.Value.
 type Memory struct {
-	tree atomic.Value // holds *radix.Tree
+	public   atomic.Value // holds *radix.Tree
+	internal atomic.Value // holds *radix.Tree
 }
 
-// NewMemory creates an empty in-memory store.
+// NewMemory creates an empty in-memory store with public and internal views.
 func NewMemory() *Memory {
 	m := &Memory{}
-	m.tree.Store(radix.New())
+	m.public.Store(radix.New())
+	m.internal.Store(radix.New())
 	return m
 }
 
-// SwapTree atomically replaces the active radix tree. The previous tree remains
-// readable by in-flight lookups until they finish.
-func (m *Memory) SwapTree(tree *radix.Tree) {
+// SwapPublicTree atomically replaces the public-view radix tree.
+func (m *Memory) SwapPublicTree(tree *radix.Tree) {
 	if tree == nil {
 		tree = radix.New()
 	}
-	m.tree.Store(tree)
+	m.public.Store(tree)
 }
 
-func (m *Memory) currentTree() *radix.Tree {
-	return m.tree.Load().(*radix.Tree)
+// SwapInternalTree atomically replaces the internal-view radix tree.
+func (m *Memory) SwapInternalTree(tree *radix.Tree) {
+	if tree == nil {
+		tree = radix.New()
+	}
+	m.internal.Store(tree)
+}
+
+// SwapTree atomically replaces the public-view radix tree. It is kept for
+// backward compatibility with callers that only manage the public view.
+func (m *Memory) SwapTree(tree *radix.Tree) {
+	m.SwapPublicTree(tree)
+}
+
+func (m *Memory) publicTree() *radix.Tree {
+	return m.public.Load().(*radix.Tree)
+}
+
+func (m *Memory) internalTree() *radix.Tree {
+	return m.internal.Load().(*radix.Tree)
 }
 
 // NormalizeName returns the FQDN in lowercase with a trailing dot.
@@ -60,11 +80,16 @@ func NormalizeName(name string) string {
 	return name
 }
 
-// InsertRR adds a DNS resource record to the active tree. It is intended for
-// single-threaded initialization and tests; production reloads build a fresh tree
-// off the request path and swap it in atomically.
+// InsertRR adds a DNS resource record to the public view tree. It is intended
+// for single-threaded initialization and tests; production reloads build fresh
+// trees off the request path and swap them in atomically.
 func (m *Memory) InsertRR(rr mdns.RR) {
-	insertRR(m.currentTree(), rr)
+	insertRR(m.publicTree(), rr)
+}
+
+// InsertInternalRR adds a DNS resource record to the internal view tree.
+func (m *Memory) InsertInternalRR(rr mdns.RR) {
+	insertRR(m.internalTree(), rr)
 }
 
 func insertRR(tree *radix.Tree, rr mdns.RR) {
@@ -88,10 +113,23 @@ func insertRR(tree *radix.Tree, rr mdns.RR) {
 	tree.Insert(name, byType)
 }
 
-// Lookup returns resource records for the given FQDN and query type.
+// Lookup returns resource records from the public view for the given FQDN and type.
 func (m *Memory) Lookup(name string, qtype uint16) ([]mdns.RR, LookupStatus) {
+	return lookupInTree(m.publicTree(), name, qtype)
+}
+
+// LookupPublic returns resource records from the public view.
+func (m *Memory) LookupPublic(name string, qtype uint16) ([]mdns.RR, LookupStatus) {
+	return lookupInTree(m.publicTree(), name, qtype)
+}
+
+// LookupInternal returns resource records from the internal view.
+func (m *Memory) LookupInternal(name string, qtype uint16) ([]mdns.RR, LookupStatus) {
+	return lookupInTree(m.internalTree(), name, qtype)
+}
+
+func lookupInTree(tree *radix.Tree, name string, qtype uint16) ([]mdns.RR, LookupStatus) {
 	name = NormalizeName(name)
-	tree := m.currentTree()
 
 	raw, ok := tree.Get(name)
 	if !ok {

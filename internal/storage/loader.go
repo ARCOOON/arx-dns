@@ -13,28 +13,58 @@ import (
 	mdns "github.com/miekg/dns"
 )
 
-// LoadZonesFromDir scans dir for files with a .zone extension, builds a new radix
-// tree, and atomically swaps it into store. Malformed files are logged and skipped;
-// loading never panics. When dir does not exist, the active tree is left unchanged.
+const internalViewDir = "internal"
+
+// LoadZonesFromDir loads zone files from dir into the public view and from
+// dir/internal into the internal view, then atomically swaps both radix trees.
+// Root-level *.zone files are public; only the internal subdirectory holds the
+// internal view. Malformed files are logged and skipped.
 func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	tree, loaded, skipped := buildTreeFromDir(dir, logger)
-	if tree == nil {
-		return
+	publicTree, publicLoaded, publicSkipped := buildTreeFromDir(dir, logger)
+	internalTree, internalLoaded, internalSkipped := buildTreeFromDir(filepath.Join(dir, internalViewDir), logger)
+	if internalTree == nil {
+		internalTree = radix.New()
 	}
 
-	store.SwapTree(tree)
-	logger.Info("zone loading complete", "directory", dir, "loaded", loaded, "skipped", skipped)
+	if publicTree != nil {
+		store.SwapPublicTree(publicTree)
+	}
+	store.SwapInternalTree(internalTree)
+
+	logger.Info("zone loading complete",
+		"directory", dir,
+		"public_loaded", publicLoaded,
+		"public_skipped", publicSkipped,
+		"internal_loaded", internalLoaded,
+		"internal_skipped", internalSkipped,
+	)
+}
+
+// buildViewsFromDir constructs fresh public and internal radix trees from root.
+func buildViewsFromDir(root string, logger *slog.Logger) (public, internal *radix.Tree, publicLoaded, publicSkipped, internalLoaded, internalSkipped int) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	public, publicLoaded, publicSkipped = buildTreeFromDir(root, logger)
+	internal, internalLoaded, internalSkipped = buildTreeFromDir(filepath.Join(root, internalViewDir), logger)
+	if internal == nil {
+		internal = radix.New()
+	}
+	return public, internal, publicLoaded, publicSkipped, internalLoaded, internalSkipped
 }
 
 func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			logger.Warn("zones directory not found", "path", dir)
+			if dir != "" && !strings.HasSuffix(filepath.Base(dir), internalViewDir) {
+				logger.Warn("zones directory not found", "path", dir)
+			}
 			return nil, 0, 0
 		}
 		logger.Error("failed to read zones directory", "path", dir, "error", err)

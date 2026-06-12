@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,9 +14,8 @@ import (
 
 const defaultReloadDebounce = 500 * time.Millisecond
 
-// StartWatcher watches dir for create, write, and remove events on .zone files and
-// hot-reloads the store by building a new radix tree and swapping it in atomically.
-// The watcher runs until ctx is cancelled.
+// StartWatcher watches dir and dir/internal for create, write, and remove events on
+// .zone files and hot-reloads both public and internal views atomically.
 func StartWatcher(ctx context.Context, dir string, store *Memory, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
@@ -30,10 +30,21 @@ func StartWatcher(ctx context.Context, dir string, store *Memory, logger *slog.L
 		_ = watcher.Close()
 		return err
 	}
+	watchInternalDir(watcher, dir, logger)
 
 	go runWatcher(ctx, watcher, dir, store, logger, defaultReloadDebounce)
 	logger.Info("zone file watcher started", "directory", dir, "debounce", defaultReloadDebounce.String())
 	return nil
+}
+
+func watchInternalDir(watcher *fsnotify.Watcher, root string, logger *slog.Logger) {
+	internalDir := filepath.Join(root, internalViewDir)
+	if _, err := os.Stat(internalDir); err != nil {
+		return
+	}
+	if err := watcher.Add(internalDir); err != nil {
+		logger.Warn("failed to watch internal zones directory", "path", internalDir, "error", err)
+	}
 }
 
 func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, store *Memory, logger *slog.Logger, debounce time.Duration) {
@@ -45,14 +56,21 @@ func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, stor
 		reload = func(trigger string) {
 			logger.Info("zone reload triggered", "directory", dir, "trigger", trigger)
 
-			tree, loaded, skipped := buildTreeFromDir(dir, logger)
-			if tree == nil {
-				logger.Warn("zone reload skipped; directory unavailable", "directory", dir)
+			publicTree, internalTree, publicLoaded, publicSkipped, internalLoaded, internalSkipped := buildViewsFromDir(dir, logger)
+			if publicTree == nil {
+				logger.Warn("zone reload skipped; public directory unavailable", "directory", dir)
 				return
 			}
 
-			store.SwapTree(tree)
-			logger.Info("zone reload complete", "directory", dir, "loaded", loaded, "skipped", skipped)
+			store.SwapPublicTree(publicTree)
+			store.SwapInternalTree(internalTree)
+			logger.Info("zone reload complete",
+				"directory", dir,
+				"public_loaded", publicLoaded,
+				"public_skipped", publicSkipped,
+				"internal_loaded", internalLoaded,
+				"internal_skipped", internalSkipped,
+			)
 		}
 		scheduleReload = func(trigger string) {
 			mu.Lock()
@@ -94,12 +112,20 @@ func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, stor
 			if !ok {
 				return
 			}
+			if event.Has(fsnotify.Create) && isInternalDirCreate(event, dir) {
+				watchInternalDir(watcher, dir, logger)
+			}
 			if !isZoneFileEvent(event) {
 				continue
 			}
 			scheduleReload(event.Op.String())
 		}
 	}
+}
+
+func isInternalDirCreate(event fsnotify.Event, root string) bool {
+	internalDir := filepath.Join(root, internalViewDir)
+	return event.Name == internalDir && event.Has(fsnotify.Create)
 }
 
 func isZoneFileEvent(event fsnotify.Event) bool {
