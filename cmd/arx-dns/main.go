@@ -23,6 +23,7 @@ func main() {
 	port := flag.Int("port", 53, "port to bind to")
 	loops := flag.Int("loops", 0, "number of gnet event loops (0 uses all CPU cores)")
 	zones := flag.String("zones", "./zones", "directory containing BIND .zone files")
+	upstreams := flag.String("upstreams", "1.1.1.1:53,1.0.0.1:53", "comma-separated upstream DNS resolvers for recursive forwarding")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -40,8 +41,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	proc := dnsproc.New(store)
 	stats := telemetry.New()
+
+	upstreamAddrs, err := dnsproc.ParseUpstreams(*upstreams)
+	if err != nil {
+		logger.Error("invalid upstream configuration", "upstreams", *upstreams, "error", err)
+		os.Exit(1)
+	}
+
+	forwarder := dnsproc.NewForwarder(upstreamAddrs, stats)
+	proc := dnsproc.New(store, forwarder)
 
 	cfg := network.Config{
 		Address:          net.JoinHostPort(*listen, strconv.Itoa(*port)),
@@ -69,6 +78,7 @@ func main() {
 	logger.Info("starting arx-dns reactors",
 		"address", cfg.Address,
 		"event_loops", cfg.ReusePortSockets,
+		"upstreams", upstreamAddrs,
 	)
 	startReactor("udp", udpReactor.Run)
 	startReactor("tcp", tcpReactor.Run)
