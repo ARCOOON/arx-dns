@@ -71,6 +71,7 @@
   - [x] Authorized recursive clients (`recursive.trusted_subnets`, REFUSED for untrusted RD queries) (Phase 09).
   - [ ] Authorized zone transfer (AXFR/IXFR) peers.
   - [ ] Management/API access.
+    - [x] Bearer-token management API on `[api]` listener (Phase 15).
 - [ ] **DNS Cookies (RFC 7873):** Protection against IP spoofing and cache poisoning attacks.
 
 ## 7. Storage Engine & Pluggable Backends
@@ -84,7 +85,9 @@
 
 - [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14).
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
+  - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, and firewall-blocked queries (JSON-serializable snapshot for future API).
+- [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
   - [ ] Latency histograms.

@@ -24,6 +24,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                               |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                             |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                  |
+| `internal/api/`       | Management HTTP API for health checks, telemetry exposure, and zone reload                                                                                                      |
 
 ## Build & Run
 
@@ -119,6 +120,10 @@ key_file = './certs/server.key'
 [listeners]
 dot = ':853'
 doh = ':443'
+
+[api]
+listen = '127.0.0.1:8080'
+auth_token = 'dev-token-change-me'
 ```
 
 | Section / Key                   | Default                                       | Description                                                                                 |
@@ -130,6 +135,8 @@ doh = ':443'
 | `tls.key_file`                  | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH              |
 | `listeners.dot`                 | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                      |
 | `listeners.doh`                 | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                             |
+| `api.listen`                    | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security               |
+| `api.auth_token`                | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                          |
 | `zones.directory`               | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
 | `recursive.upstreams`           | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
 | `recursive.trusted_subnets`     | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
@@ -284,7 +291,27 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `tcp_timeouts`          | TCP connections closed for failing to send a complete DNS frame in time |
 | `firewall_blocked`      | Queries blocked by the DNS firewall blocklist engine                    |
 
-`Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs for a future management API.
+`Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`).
+
+### Management API
+
+A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication.
+
+| Endpoint               | Method | Auth   | Description                                        |
+| ---------------------- | ------ | ------ | -------------------------------------------------- |
+| `/health`              | GET    | None   | Liveness probe; returns `{"status":"ok"}`          |
+| `/api/v1/stats`        | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters    |
+| `/api/v1/zones/reload` | POST   | Bearer | Force zone reload (same logic as fsnotify watcher) |
+
+Configure the listener and token under `[api]` in `config.toml`. The default bind address is `127.0.0.1:8080` so the API is not exposed on all interfaces. For Docker or remote access, set `api.listen = '0.0.0.0:8080'` and publish the port in Compose.
+
+```bash
+curl -s http://127.0.0.1:8080/health
+curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/stats
+curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones/reload
+```
+
+The API shuts down gracefully with the DNS reactors on `SIGINT` or `SIGTERM`.
 
 ## Development Environment
 
