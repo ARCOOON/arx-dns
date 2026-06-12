@@ -2,6 +2,9 @@
 /arx-dns
 /bin/
 
+# Local runtime configuration (auto-generated on first start)
+config.toml
+
 # Go
 *.exe
 *.test
@@ -10,3 +13,4 @@
 # Phase working notes (not versioned)
 /phases/
 /**/*_test.go
+data/
