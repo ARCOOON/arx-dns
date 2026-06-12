@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/ARCOOON/arx-dns/internal/api"
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
@@ -82,7 +83,7 @@ func main() {
 	reactors := network.NewReactors(cfg, logger, stats, proc)
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, 4)
+	errCh := make(chan error, 5)
 
 	startService := func(name string, run func(context.Context) error) {
 		wg.Add(1)
@@ -99,6 +100,7 @@ func main() {
 	logger.Info("starting arx-dns",
 		"config", *configPath,
 		"address", cfg.ListenAddress(),
+		"api", cfg.API.Listen,
 		"event_loops", cfg.Server.EventLoops,
 		"zones", cfg.Zones.Directory,
 		"upstreams", cfg.Recursive.Upstreams,
@@ -107,6 +109,8 @@ func main() {
 		"block_action", fwAction,
 		"encrypted_dns", cfg.EncryptedDNSEnabled(),
 	)
+	apiServer := api.New(cfg, stats, store, logger)
+	startService("api", apiServer.Run)
 	startService("udp", reactors.UDP.Run)
 	startService("tcp", reactors.TCP.Run)
 
