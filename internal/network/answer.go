@@ -14,6 +14,8 @@ func recordAnswer(stats *telemetry.Stats, response []byte) {
 	switch msg.Rcode {
 	case mdns.RcodeNameError:
 		stats.IncNXDomainAnswer()
+	case mdns.RcodeRefused:
+		stats.IncRefusedAnswer()
 	case mdns.RcodeSuccess:
 		if msg.Authoritative {
 			stats.IncAuthoritativeAnswer()

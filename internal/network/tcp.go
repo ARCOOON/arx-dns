@@ -91,7 +91,8 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 			return gnet.Close
 		}
 
-		response, err := r.proc.Response(payload)
+		client := ClientIPFromAddr(c.RemoteAddr())
+		response, err := r.proc.Response(client, payload)
 		if err != nil {
 			r.logger.Debug("tcp parse failed", "error", err, "bytes", len(payload))
 			r.stats.IncParseError()
