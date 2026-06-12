@@ -1,0 +1,58 @@
+{
+  "name": "arx-dns-development",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "service": "workspace",
+  "workspaceFolder": "/workspaces/arx-dns",
+  "remoteUser": "vscode",
+  "containerUser": "vscode",
+  "runArgs": [
+    "--cap-add=NET_ADMIN",
+    "--cap-add=NET_BIND_SERVICE",
+    "--sysctl=net.ipv4.ip_unprivileged_port_start=0"
+  ],
+  "appPort": [
+    "53:53/udp",
+    "53:53/tcp"
+  ],
+  "forwardPorts": [
+    53
+  ],
+  "portsAttributes": {
+    "53": {
+      "label": "DNS (UDP/TCP)",
+      "onAutoForward": "notify",
+      "requireLocalPort": true
+    }
+  },
+  "containerEnv": {
+    "CGO_ENABLED": "0",
+    "GO111MODULE": "on"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "tamasfe.even-better-toml",
+        "yzhang.markdown-all-in-one",
+        "davidanson.vscode-markdownlint",
+        "bierner.markdown-mermaid"
+      ],
+      "settings": {
+        "go.useLanguageServer": true,
+        "go.toolsManagement.checkForUpdates": "local",
+        "go.lintOnSave": "package",
+        "editor.formatOnSave": true,
+        "[go]": {
+          "editor.defaultFormatter": "golang.go"
+        },
+        "[markdown]": {
+          "editor.wordWrap": "on"
+        }
+      }
+    }
+  },
+  "postCreateCommand": "go env CGO_ENABLED GOOS GOARCH && dig -v | head -1"
+}
