@@ -6,9 +6,10 @@ alwaysApply: true
 
 # ARX Ecosystem Master Rule
 
-You are developing a module for "ARX", a sovereign, self-hosted infrastructure platform. 
+You are developing a module for "ARX", a sovereign, self-hosted infrastructure platform.
 
 ## Global Constraints
+
 - **Architecture:** All sub-projects are strictly modular, independently deployable, and completely optional. Never create hard dependencies between modules unless explicitly required.
 - **Principles:** Enforce KISS and DRY. Keep logic flat, minimal, and highly readable.
 - **Development Flow:** 1. Native binaries/CLI first.

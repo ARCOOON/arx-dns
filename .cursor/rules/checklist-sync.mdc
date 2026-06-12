@@ -6,7 +6,7 @@ alwaysApply: true
 
 # Mandatory Checklist Synchronization
 
-The project state must always be accurately reflected in the `CHECKLIST.md` file. 
+The project state must always be accurately reflected in the `CHECKLIST.md` file.
 
 ## Execution Workflow
 

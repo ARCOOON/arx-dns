@@ -9,6 +9,7 @@ alwaysApply: true
 You are developing `arx-dns`, a high-performance, universal DNS server built from scratch in Go.
 
 ## Core Directives
+
 - **Performance First:** Focus on zero-allocation packet parsing and system-level I/O optimization.
 - **No Heavy Frameworks:** Rely strictly on the Go standard library (`net`) and `golang.org/x/sys/unix` for advanced socket control.
 - **Protocol Compliance:** Adhere strictly to RFC 1035 for binary DNS packet parsing and serialization.
