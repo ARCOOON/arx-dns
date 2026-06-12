@@ -23,6 +23,7 @@ type Stats struct {
 	aclRejected          atomic.Uint64
 	truncatedResponses   atomic.Uint64
 	tcpTimeouts          atomic.Uint64
+	firewallBlocked      atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -48,6 +49,7 @@ type Snapshot struct {
 	ACLRejected          uint64 `json:"acl_rejected"`
 	TruncatedResponses   uint64 `json:"truncated_responses"`
 	TCPTimeouts          uint64 `json:"tcp_timeouts"`
+	FirewallBlocked      uint64 `json:"firewall_blocked"`
 }
 
 // Snapshot returns the current counter values.
@@ -69,6 +71,7 @@ func (s *Stats) Snapshot() Snapshot {
 		ACLRejected:          s.aclRejected.Load(),
 		TruncatedResponses:   s.truncatedResponses.Load(),
 		TCPTimeouts:          s.tcpTimeouts.Load(),
+		FirewallBlocked:      s.firewallBlocked.Load(),
 	}
 }
 
@@ -143,4 +146,8 @@ func (s *Stats) IncTruncatedResponse() {
 
 func (s *Stats) IncTCPTimeout() {
 	s.tcpTimeouts.Add(1)
+}
+
+func (s *Stats) IncFirewallBlocked() {
+	s.firewallBlocked.Add(1)
 }
