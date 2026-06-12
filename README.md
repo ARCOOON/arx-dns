@@ -11,31 +11,55 @@ High-performance, enterprise-grade DNS server for the ARX ecosystem.
 
 ## Architecture
 
-Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2` for event-driven reactor I/O (`epoll`/`kqueue`) while keeping full control over the socket lifecycle. DNS wire-format parsing and serialization use `github.com/miekg/dns` as a codec only — routing and I/O remain in `internal/network/`.
+Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2` for event-driven reactor I/O (`epoll`/`kqueue`) while keeping full control over the socket lifecycle. DNS wire-format parsing and serialization use `github.com/miekg/dns` as a codec only — routing and I/O remain in `internal/network/`. Authoritative records are served from a thread-safe in-memory radix tree (`internal/storage`).
 
 ### Project Layout
 
 | Path                    | Purpose                                                       |
 | ----------------------- | ------------------------------------------------------------- |
-| `cmd/arx-dns/`          | Server entrypoint (signal handling, reactor startup)          |
+| `cmd/arx-dns/`          | Server entrypoint (CLI flags, signal handling, reactor startup) |
 | `internal/network/`     | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind |
-| `internal/dnsproc/`     | DNS message parse/serialize and REFUSED response builder      |
+| `internal/dnsproc/`     | DNS message parse/serialize and authoritative response builder  |
+| `internal/storage/`     | Thread-safe in-memory radix-tree zone store                   |
 | `internal/telemetry/`   | Lock-free atomic counters (`sync/atomic`) for operations stats |
 
 ## Build & Run
 
 ```bash
 go build -o arx-dns ./cmd/arx-dns/
-sudo ./arx-dns   # or run inside the devcontainer (port 53 allowed for vscode)
+./arx-dns   # binds 0.0.0.0:53 by default (use sudo or devcontainer for port 53)
 ```
 
-The server binds `[::]:53` on all interfaces with dual-stack IPv4/IPv6 (IPv4 via companion `0.0.0.0:53` bind). It listens concurrently on UDP and TCP using gnet reactors with `SO_REUSEPORT` (one event-loop per CPU core per protocol). Valid incoming DNS queries receive a serialized response with `RCODE=REFUSED`.
+### CLI Flags
+
+| Flag       | Default     | Description                                              |
+| ---------- | ----------- | -------------------------------------------------------- |
+| `-listen`  | `0.0.0.0`   | IP address to bind to                                    |
+| `-port`    | `53`        | UDP/TCP port to listen on                                |
+| `-loops`   | `0`         | gnet event loops per protocol (`0` = one per CPU core)   |
+
+Example:
+
+```bash
+./arx-dns -listen 127.0.0.1 -port 5353 -loops 4
+```
+
+On startup, a small demo zone is loaded for immediate testing:
+
+| Name                 | Type  | Value              |
+| -------------------- | ----- | ------------------ |
+| `router.arx.local`   | A     | `10.10.0.1`        |
+| `router.arx.local`   | AAAA  | `fd00::1`          |
+| `www.arx.local`      | CNAME | `router.arx.local` |
+
+Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
 
 Verify with:
 
 ```bash
-dig @127.0.0.1 example.com A
-dig @127.0.0.1 example.com A +tcp
+dig @127.0.0.1 router.arx.local A
+dig @127.0.0.1 www.arx.local CNAME +tcp
+dig @127.0.0.1 unknown.example.com A   # NXDOMAIN
 ```
 
 Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational counters are logged as JSON on exit.
@@ -44,15 +68,17 @@ Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational count
 
 `internal/telemetry.Stats` tracks:
 
-| Field             | Description                                      |
-| ----------------- | ------------------------------------------------ |
-| `total_queries`   | Valid queries processed                          |
-| `udp_queries`     | UDP query count                                  |
-| `tcp_queries`     | TCP query count                                  |
-| `dropped_packets` | Parse failures, invalid frames, and write errors |
-| `parse_errors`    | DNS unpack failures                              |
-| `write_errors`    | Response send failures                           |
-| `refused_answers` | REFUSED responses sent                           |
+| Field                    | Description                                      |
+| ------------------------ | ------------------------------------------------ |
+| `total_queries`          | Valid queries processed                          |
+| `udp_queries`            | UDP query count                                  |
+| `tcp_queries`            | TCP query count                                  |
+| `dropped_packets`        | Parse failures, invalid frames, and write errors |
+| `parse_errors`           | DNS unpack failures                              |
+| `write_errors`           | Response send failures                           |
+| `refused_answers`        | REFUSED responses sent (reserved for future use) |
+| `authoritative_answers`  | Authoritative NOERROR / NODATA responses         |
+| `nxdomain_answers`       | NXDOMAIN responses sent                          |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs for a future management API.
 

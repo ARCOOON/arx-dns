@@ -17,7 +17,7 @@
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
 - [ ] **EDNS0 Support (RFC 6891):** Handling of extended payload sizes (>512 bytes), EDNS options, and Path MTU Discovery.
 - [ ] **Comprehensive Record Type Support:** Native processing of:
-  - [ ] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR`.
+  - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03).
   - [ ] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS`.
 - [ ] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597).
 - [ ] **Compression Algorithm:** RFC-compliant message compression to minimize packet size.
@@ -25,6 +25,7 @@
 ## 3. Operational Modes (Hybrid Architecture)
 
 - [ ] **Authoritative Mode:**
+  - [~] In-memory authoritative resolution with radix-tree storage and NXDOMAIN for unknown names (Phase 03).
   - [ ] Parsing and validation of standard BIND zone files.
   - [ ] Dynamic Updates (RFC 2136) secured via TSIG.
   - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
@@ -68,7 +69,7 @@
 
 ## 7. Storage Engine & Pluggable Backends
 
-- [ ] **In-Memory Storage:** Highly optimized data structures (Radix Trees or Red-Black Trees) for ultra-fast RAM lookups.
+- [x] **In-Memory Storage:** Thread-safe radix-tree store (`github.com/armon/go-radix`) for authoritative FQDN lookups (`A`, `AAAA`, `CNAME`).
 - [ ] **Database Backends (Dynamic Zones):** Pluggable driver architecture for real-time relational (PostgreSQL, MySQL) and NoSQL/KV-Store (Redis, etcd) integration.
 - [ ] **Directory Integration:** LDAP/Active Directory bindings for automated IPAM (IP Address Management) synchronization.
 
