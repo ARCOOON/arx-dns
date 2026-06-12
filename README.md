@@ -15,13 +15,13 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                    | Purpose                                                       |
-| ----------------------- | ------------------------------------------------------------- |
-| `cmd/arx-dns/`          | Server entrypoint (CLI flags, signal handling, reactor startup) |
-| `internal/network/`     | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind |
-| `internal/dnsproc/`     | DNS message parse/serialize and authoritative response builder  |
-| `internal/storage/`     | Thread-safe in-memory radix-tree zone store                   |
-| `internal/telemetry/`   | Lock-free atomic counters (`sync/atomic`) for operations stats |
+| Path                  | Purpose                                                          |
+| --------------------- | ---------------------------------------------------------------- |
+| `cmd/arx-dns/`        | Server entrypoint (CLI flags, signal handling, reactor startup)  |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind    |
+| `internal/dnsproc/`   | DNS message parse/serialize and authoritative response builder   |
+| `internal/storage/`   | Thread-safe in-memory radix-tree zone store and BIND zone loader |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats   |
 
 ## Build & Run
 
@@ -32,25 +32,28 @@ go build -o arx-dns ./cmd/arx-dns/
 
 ### CLI Flags
 
-| Flag       | Default     | Description                                              |
-| ---------- | ----------- | -------------------------------------------------------- |
-| `-listen`  | `0.0.0.0`   | IP address to bind to                                    |
-| `-port`    | `53`        | UDP/TCP port to listen on                                |
-| `-loops`   | `0`         | gnet event loops per protocol (`0` = one per CPU core)   |
+| Flag      | Default   | Description                                            |
+| --------- | --------- | ------------------------------------------------------ |
+| `-listen` | `0.0.0.0` | IP address to bind to                                  |
+| `-port`   | `53`      | UDP/TCP port to listen on                              |
+| `-loops`  | `0`       | gnet event loops per protocol (`0` = one per CPU core) |
+| `-zones`  | `./zones` | Directory containing BIND `.zone` files                |
 
 Example:
 
 ```bash
-./arx-dns -listen 127.0.0.1 -port 5353 -loops 4
+./arx-dns -listen 127.0.0.1 -port 5353 -loops 4 -zones ./zones
 ```
 
-On startup, a small demo zone is loaded for immediate testing:
+On startup, all `*.zone` files in the zones directory are loaded into the in-memory radix tree. The zone apex is taken from the filename (e.g. `arx.local.zone` → origin `arx.local.`) or from a `$ORIGIN` directive inside the file. Malformed zone files are logged and skipped; the server continues with the remaining zones.
 
-| Name                 | Type  | Value              |
-| -------------------- | ----- | ------------------ |
-| `router.arx.local`   | A     | `10.10.0.1`        |
-| `router.arx.local`   | AAAA  | `fd00::1`          |
-| `www.arx.local`      | CNAME | `router.arx.local` |
+The default `zones/arx.local.zone` ships a small demo zone for immediate testing:
+
+| Name               | Type  | Value              |
+| ------------------ | ----- | ------------------ |
+| `router.arx.local` | A     | `10.10.0.1`        |
+| `router.arx.local` | AAAA  | `fd00::1`          |
+| `www.arx.local`    | CNAME | `router.arx.local` |
 
 Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
 
@@ -68,17 +71,17 @@ Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational count
 
 `internal/telemetry.Stats` tracks:
 
-| Field                    | Description                                      |
-| ------------------------ | ------------------------------------------------ |
-| `total_queries`          | Valid queries processed                          |
-| `udp_queries`            | UDP query count                                  |
-| `tcp_queries`            | TCP query count                                  |
-| `dropped_packets`        | Parse failures, invalid frames, and write errors |
-| `parse_errors`           | DNS unpack failures                              |
-| `write_errors`           | Response send failures                           |
-| `refused_answers`        | REFUSED responses sent (reserved for future use) |
-| `authoritative_answers`  | Authoritative NOERROR / NODATA responses         |
-| `nxdomain_answers`       | NXDOMAIN responses sent                          |
+| Field                   | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `total_queries`         | Valid queries processed                          |
+| `udp_queries`           | UDP query count                                  |
+| `tcp_queries`           | TCP query count                                  |
+| `dropped_packets`       | Parse failures, invalid frames, and write errors |
+| `parse_errors`          | DNS unpack failures                              |
+| `write_errors`          | Response send failures                           |
+| `refused_answers`       | REFUSED responses sent (reserved for future use) |
+| `authoritative_answers` | Authoritative NOERROR / NODATA responses         |
+| `nxdomain_answers`      | NXDOMAIN responses sent                          |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs for a future management API.
 

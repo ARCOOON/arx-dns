@@ -25,8 +25,8 @@
 ## 3. Operational Modes (Hybrid Architecture)
 
 - [ ] **Authoritative Mode:**
-  - [~] In-memory authoritative resolution with radix-tree storage and NXDOMAIN for unknown names (Phase 03).
-  - [ ] Parsing and validation of standard BIND zone files.
+  - [x] In-memory authoritative resolution with radix-tree storage and NXDOMAIN for unknown names (Phase 03).
+  - [x] Parsing and validation of standard BIND zone files (Phase 04).
   - [ ] Dynamic Updates (RFC 2136) secured via TSIG.
   - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
 - [ ] **Recursive / Resolver Mode:**
