@@ -61,6 +61,14 @@ The default `zones/arx.local.zone` ships a small demo zone for immediate testing
 
 Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown and recursion is not requested, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
 
+### EDNS0 (RFC 6891)
+
+When a query includes an OPT pseudo-record in the Additional section, the server echoes EDNS0 support in the response and honors the client's advertised UDP payload size. Values below 512 bytes are treated as 512 per RFC 6891. If the assembled UDP response exceeds the negotiated limit (512 bytes when EDNS0 is absent), the **TC (Truncation)** bit is set and records are omitted until the message fits; clients should retry over TCP. TCP responses are never truncated by UDP size limits but still include an OPT record when the request carried one.
+
+### TCP connection hardening
+
+The TCP reactor enables kernel keep-alive probes (`WithTCPKeepAlive`, 3-minute idle, 30-second interval, 3 probes) to reap dead peers. Each connection must deliver a complete length-prefixed DNS frame within **3 seconds** of opening or since the last completed exchange; otherwise the connection is closed and `tcp_timeouts` is incremented. A 500ms ticker sweeps idle connections that never send data (Slowloris mitigation).
+
 ### Split-DNS views
 
 | View       | Directory                | Visibility                                |
@@ -95,22 +103,24 @@ Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational count
 
 `internal/telemetry.Stats` tracks:
 
-| Field                   | Description                                                    |
-| ----------------------- | -------------------------------------------------------------- |
-| `total_queries`         | Valid queries processed                                        |
-| `udp_queries`           | UDP query count                                                |
-| `tcp_queries`           | TCP query count                                                |
-| `dropped_packets`       | Parse failures, invalid frames, and write errors               |
-| `parse_errors`          | DNS unpack failures                                            |
-| `write_errors`          | Response send failures                                         |
-| `refused_answers`       | REFUSED responses sent (ACL-denied recursion and other policy) |
-| `authoritative_answers` | Authoritative NOERROR / NODATA responses                       |
-| `nxdomain_answers`      | NXDOMAIN responses sent                                        |
-| `forwarded_queries`     | Recursive queries successfully forwarded upstream              |
-| `upstream_failures`     | Recursive queries where all upstreams failed                   |
-| `cache_hits`            | Forwarded queries served from the response cache               |
-| `cache_misses`          | Forwarded queries that missed the response cache               |
-| `acl_rejected`          | Recursive queries denied because the client IP is untrusted    |
+| Field                   | Description                                                             |
+| ----------------------- | ----------------------------------------------------------------------- |
+| `total_queries`         | Valid queries processed                                                 |
+| `udp_queries`           | UDP query count                                                         |
+| `tcp_queries`           | TCP query count                                                         |
+| `dropped_packets`       | Parse failures, invalid frames, and write errors                        |
+| `parse_errors`          | DNS unpack failures                                                     |
+| `write_errors`          | Response send failures                                                  |
+| `refused_answers`       | REFUSED responses sent (ACL-denied recursion and other policy)          |
+| `authoritative_answers` | Authoritative NOERROR / NODATA responses                                |
+| `nxdomain_answers`      | NXDOMAIN responses sent                                                 |
+| `forwarded_queries`     | Recursive queries successfully forwarded upstream                       |
+| `upstream_failures`     | Recursive queries where all upstreams failed                            |
+| `cache_hits`            | Forwarded queries served from the response cache                        |
+| `cache_misses`          | Forwarded queries that missed the response cache                        |
+| `acl_rejected`          | Recursive queries denied because the client IP is untrusted             |
+| `truncated_responses`   | UDP responses truncated with TC set due to payload size limits          |
+| `tcp_timeouts`          | TCP connections closed for failing to send a complete DNS frame in time |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs for a future management API.
 

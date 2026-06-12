@@ -10,12 +10,12 @@
 - [x] **Protocol Support:** Concurrent handling of UDP and TCP on Port 53 (RFC 1035 length-prefixed TCP framing; UDP datagram receive).
 - [x] **High-Concurrency Engine:** Event-driven, non-blocking I/O architecture (using `epoll`, `kqueue`, or `io_uring`) to process millions of Queries Per Second (QPS).
 - [x] **SO_REUSEPORT Implementation:** Kernel-level load balancing for multi-core scaling (`runtime.NumCPU()` sockets per protocol).
-- [ ] **Connection Management:** TCP connection pooling, keep-alive timers, and protection against TCP resource exhaustion (e.g., Slowloris mitigation).
+- [x] **Connection Management:** TCP keep-alive (`WithTCPKeepAlive`), 3-second read-frame timeout with OnTick sweep, and Slowloris mitigation via forced connection close (Phase 10).
 
 ## 2. DNS Packet Parsing & Protocol Core
 
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
-- [ ] **EDNS0 Support (RFC 6891):** Handling of extended payload sizes (>512 bytes), EDNS options, and Path MTU Discovery.
+- [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, and OPT echo in responses (Phase 10). EDNS options and Path MTU Discovery remain open.
 - [ ] **Comprehensive Record Type Support:** Native processing of:
   - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06).
   - [ ] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS`.
@@ -81,7 +81,7 @@
 ## 8. Management, Automation & Observability
 
 - [ ] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, and cache hits/misses (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, and TCP read timeouts (JSON-serializable snapshot for future API).
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
   - [ ] Latency histograms.
