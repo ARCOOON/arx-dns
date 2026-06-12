@@ -2,95 +2,67 @@ package network
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"net"
-	"sync"
+
+	"github.com/ARCOOON/arx-dns/internal/dnsproc"
+	"github.com/ARCOOON/arx-dns/internal/telemetry"
+	"github.com/panjf2000/gnet/v2"
 )
 
-const maxUDPPayload = 65535
-
-// UDPListener serves DNS over UDP with kernel-level SO_REUSEPORT load balancing.
-type UDPListener struct {
-	cfg    Config
-	logger *slog.Logger
-
-	mu    sync.Mutex
-	conns []net.PacketConn
-	wg    sync.WaitGroup
+// UDPReactor serves DNS over UDP using a gnet event-driven reactor.
+type UDPReactor struct {
+	reactor
+	stats *telemetry.Stats
 }
 
-// NewUDPListener creates a UDP listener for the given configuration.
-func NewUDPListener(cfg Config, logger *slog.Logger) *UDPListener {
+// NewUDPReactor creates a UDP reactor for the given configuration.
+func NewUDPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats) *UDPReactor {
+	if stats == nil {
+		stats = telemetry.New()
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &UDPListener{cfg: cfg, logger: logger}
+	return &UDPReactor{
+		reactor: reactor{
+			cfg:    cfg,
+			logger: logger,
+			proto:  "udp",
+		},
+		stats: stats,
+	}
 }
 
-// Run binds SO_REUSEPORT sockets and processes packets until ctx is canceled.
-func (l *UDPListener) Run(ctx context.Context) error {
-	sockets := l.cfg.socketCount()
-	conns := make([]net.PacketConn, 0, sockets)
+// Run starts the UDP reactor until ctx is canceled.
+func (r *UDPReactor) Run(ctx context.Context) error {
+	r.ctx = ctx
+	return runReactor(ctx, r.cfg, "udp", r, r.logger, r.gnetOptions()...)
+}
 
-	for i := 0; i < sockets; i++ {
-		conn, err := listenPacket(ctx, "udp", l.cfg.Address)
+func (r *UDPReactor) OnTraffic(c gnet.Conn) gnet.Action {
+	payload, err := c.Next(-1)
+	if err != nil || len(payload) == 0 {
 		if err != nil {
-			closePacketConns(conns)
-			return fmt.Errorf("udp listen socket %d: %w", i, err)
+			r.logger.Debug("udp read failed", "error", err)
+			r.stats.IncDropped()
 		}
-		conns = append(conns, conn)
+		return gnet.None
 	}
 
-	l.mu.Lock()
-	l.conns = conns
-	l.mu.Unlock()
-
-	for _, conn := range conns {
-		l.wg.Add(1)
-		go func(c net.PacketConn) {
-			defer l.wg.Done()
-			l.serve(ctx, c)
-		}(conn)
+	response, err := dnsproc.RefusedResponse(payload)
+	if err != nil {
+		r.logger.Debug("udp parse failed", "error", err, "bytes", len(payload))
+		r.stats.IncParseError()
+		return gnet.None
 	}
 
-	<-ctx.Done()
-	l.shutdown()
-	l.wg.Wait()
-	return ctx.Err()
-}
-
-func (l *UDPListener) serve(ctx context.Context, conn net.PacketConn) {
-	buf := make([]byte, maxUDPPayload)
-
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-
-		n, _, err := conn.ReadFrom(buf)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			l.logger.Warn("udp read failed", "error", err)
-			continue
-		}
-
-		l.logger.Info("udp request received", "bytes", n)
+	if _, err := c.Write(response); err != nil {
+		r.logger.Warn("udp write failed", "error", err)
+		r.stats.IncWriteError()
+		return gnet.None
 	}
-}
 
-func (l *UDPListener) shutdown() {
-	l.mu.Lock()
-	conns := l.conns
-	l.conns = nil
-	l.mu.Unlock()
-	closePacketConns(conns)
-}
-
-func closePacketConns(conns []net.PacketConn) {
-	for _, conn := range conns {
-		_ = conn.Close()
-	}
+	r.stats.IncUDPQuery()
+	r.stats.IncRefusedAnswer()
+	return gnet.None
 }

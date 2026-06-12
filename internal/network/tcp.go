@@ -3,11 +3,11 @@ package network
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
-	"io"
 	"log/slog"
-	"net"
-	"sync"
+
+	"github.com/ARCOOON/arx-dns/internal/dnsproc"
+	"github.com/ARCOOON/arx-dns/internal/telemetry"
+	"github.com/panjf2000/gnet/v2"
 )
 
 const (
@@ -15,111 +15,98 @@ const (
 	tcpLengthPrefix   = 2
 )
 
-// TCPListener serves DNS over TCP (RFC 1035 length-prefixed framing).
-type TCPListener struct {
-	cfg    Config
-	logger *slog.Logger
-
-	mu        sync.Mutex
-	listeners []net.Listener
-	wg        sync.WaitGroup
+// TCPReactor serves DNS over TCP using a gnet event-driven reactor.
+type TCPReactor struct {
+	reactor
+	stats *telemetry.Stats
 }
 
-// NewTCPListener creates a TCP listener for the given configuration.
-func NewTCPListener(cfg Config, logger *slog.Logger) *TCPListener {
+// NewTCPReactor creates a TCP reactor for the given configuration.
+func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats) *TCPReactor {
+	if stats == nil {
+		stats = telemetry.New()
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &TCPListener{cfg: cfg, logger: logger}
+	return &TCPReactor{
+		reactor: reactor{
+			cfg:    cfg,
+			logger: logger,
+			proto:  "tcp",
+		},
+		stats: stats,
+	}
 }
 
-// Run binds SO_REUSEPORT listeners and accepts connections until ctx is canceled.
-func (l *TCPListener) Run(ctx context.Context) error {
-	sockets := l.cfg.socketCount()
-	listeners := make([]net.Listener, 0, sockets)
-
-	for i := 0; i < sockets; i++ {
-		ln, err := listenTCP(ctx, "tcp", l.cfg.Address)
-		if err != nil {
-			closeTCPListeners(listeners)
-			return fmt.Errorf("tcp listen socket %d: %w", i, err)
-		}
-		listeners = append(listeners, ln)
-	}
-
-	l.mu.Lock()
-	l.listeners = listeners
-	l.mu.Unlock()
-
-	for _, ln := range listeners {
-		l.wg.Add(1)
-		go func(listener net.Listener) {
-			defer l.wg.Done()
-			l.accept(ctx, listener)
-		}(ln)
-	}
-
-	<-ctx.Done()
-	l.shutdown()
-	l.wg.Wait()
-	return ctx.Err()
+// Run starts the TCP reactor until ctx is canceled.
+func (r *TCPReactor) Run(ctx context.Context) error {
+	r.ctx = ctx
+	return runReactor(ctx, r.cfg, "tcp", r, r.logger, r.gnetOptions()...)
 }
 
-func (l *TCPListener) accept(ctx context.Context, ln net.Listener) {
+func (r *TCPReactor) OnOpen(c gnet.Conn) ([]byte, gnet.Action) {
+	return nil, gnet.None
+}
+
+func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 	for {
-		conn, err := ln.Accept()
+		buffered := c.InboundBuffered()
+		if buffered < tcpLengthPrefix {
+			return gnet.None
+		}
+
+		header, err := c.Peek(tcpLengthPrefix)
 		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			l.logger.Warn("tcp accept failed", "error", err)
+			r.logger.Debug("tcp header peek failed", "error", err)
+			r.stats.IncDropped()
+			return gnet.Close
+		}
+
+		msgLen := int(binary.BigEndian.Uint16(header))
+		if msgLen < 1 || msgLen > maxDNSMessageSize {
+			r.logger.Debug("tcp invalid message length", "bytes", msgLen)
+			r.stats.IncDropped()
+			return gnet.Close
+		}
+
+		frameLen := tcpLengthPrefix + msgLen
+		if buffered < frameLen {
+			return gnet.None
+		}
+
+		frame, err := c.Peek(frameLen)
+		if err != nil {
+			r.logger.Debug("tcp frame peek failed", "error", err)
+			r.stats.IncDropped()
+			return gnet.Close
+		}
+
+		payload := frame[tcpLengthPrefix:frameLen]
+		if _, err := c.Discard(frameLen); err != nil {
+			r.logger.Debug("tcp frame discard failed", "error", err)
+			r.stats.IncDropped()
+			return gnet.Close
+		}
+
+		response, err := dnsproc.RefusedResponse(payload)
+		if err != nil {
+			r.logger.Debug("tcp parse failed", "error", err, "bytes", len(payload))
+			r.stats.IncParseError()
 			continue
 		}
 
-		l.wg.Add(1)
-		go func(c net.Conn) {
-			defer l.wg.Done()
-			l.handleConn(c)
-		}(conn)
-	}
-}
+		out := make([]byte, tcpLengthPrefix+len(response))
+		binary.BigEndian.PutUint16(out[:tcpLengthPrefix], uint16(len(response)))
+		copy(out[tcpLengthPrefix:], response)
 
-func (l *TCPListener) handleConn(conn net.Conn) {
-	defer conn.Close()
-
-	var lengthPrefix [tcpLengthPrefix]byte
-	if _, err := io.ReadFull(conn, lengthPrefix[:]); err != nil {
-		if err != io.EOF {
-			l.logger.Warn("tcp length read failed", "error", err)
+		if _, err := c.Write(out); err != nil {
+			r.logger.Warn("tcp write failed", "error", err)
+			r.stats.IncWriteError()
+			return gnet.Close
 		}
-		return
-	}
 
-	msgLen := int(binary.BigEndian.Uint16(lengthPrefix[:]))
-	if msgLen < 1 || msgLen > maxDNSMessageSize {
-		l.logger.Warn("tcp invalid message length", "bytes", msgLen)
-		return
-	}
-
-	payload := make([]byte, msgLen)
-	if _, err := io.ReadFull(conn, payload); err != nil {
-		l.logger.Warn("tcp payload read failed", "error", err, "expected_bytes", msgLen)
-		return
-	}
-
-	l.logger.Info("tcp request received", "bytes", msgLen)
-}
-
-func (l *TCPListener) shutdown() {
-	l.mu.Lock()
-	listeners := l.listeners
-	l.listeners = nil
-	l.mu.Unlock()
-	closeTCPListeners(listeners)
-}
-
-func closeTCPListeners(listeners []net.Listener) {
-	for _, ln := range listeners {
-		_ = ln.Close()
+		r.stats.IncTCPQuery()
+		r.stats.IncRefusedAnswer()
 	}
 }
