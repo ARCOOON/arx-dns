@@ -11,14 +11,16 @@ High-performance, enterprise-grade DNS server for the ARX ecosystem.
 
 ## Architecture
 
-Strictly adheres to KISS and DRY principles. Operates without heavy third-party frameworks. Direct system-level socket management and strict RFC 1035 compliant binary parsing.
+Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2` for event-driven reactor I/O (`epoll`/`kqueue`) while keeping full control over the socket lifecycle. DNS wire-format parsing and serialization use `github.com/miekg/dns` as a codec only — routing and I/O remain in `internal/network/`.
 
 ### Project Layout
 
-| Path                    | Purpose                                              |
-| ----------------------- | ---------------------------------------------------- |
-| `cmd/arx-dns/`          | Server entrypoint (signal handling, listener startup) |
-| `internal/network/`     | UDP/TCP listeners with `SO_REUSEPORT` socket control |
+| Path                    | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `cmd/arx-dns/`          | Server entrypoint (signal handling, reactor startup)          |
+| `internal/network/`     | gnet UDP/TCP reactors with `SO_REUSEPORT` and dual-stack bind |
+| `internal/dnsproc/`     | DNS message parse/serialize and REFUSED response builder      |
+| `internal/telemetry/`   | Lock-free atomic counters (`sync/atomic`) for operations stats |
 
 ## Build & Run
 
@@ -27,9 +29,32 @@ go build -o arx-dns ./cmd/arx-dns/
 sudo ./arx-dns   # or run inside the devcontainer (port 53 allowed for vscode)
 ```
 
-The server binds `[::]:53` on all interfaces with dual-stack IPv4/IPv6. It listens concurrently on UDP and TCP using `SO_REUSEPORT` (one socket per CPU core per protocol). Incoming requests are read and logged by payload size; DNS parsing and responses are not implemented yet.
+The server binds `[::]:53` on all interfaces with dual-stack IPv4/IPv6 (IPv4 via companion `0.0.0.0:53` bind). It listens concurrently on UDP and TCP using gnet reactors with `SO_REUSEPORT` (one event-loop per CPU core per protocol). Valid incoming DNS queries receive a serialized response with `RCODE=REFUSED`.
 
-Graceful shutdown is triggered by `SIGINT` or `SIGTERM`.
+Verify with:
+
+```bash
+dig @127.0.0.1 example.com A
+dig @127.0.0.1 example.com A +tcp
+```
+
+Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational counters are logged as JSON on exit.
+
+### Telemetry
+
+`internal/telemetry.Stats` tracks:
+
+| Field             | Description                                      |
+| ----------------- | ------------------------------------------------ |
+| `total_queries`   | Valid queries processed                          |
+| `udp_queries`     | UDP query count                                  |
+| `tcp_queries`     | TCP query count                                  |
+| `dropped_packets` | Parse failures, invalid frames, and write errors |
+| `parse_errors`    | DNS unpack failures                              |
+| `write_errors`    | Response send failures                           |
+| `refused_answers` | REFUSED responses sent                           |
+
+`Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs for a future management API.
 
 ## Development Environment
 
