@@ -35,6 +35,11 @@ func main() {
 	store := storage.NewMemory()
 	storage.LoadZonesFromDir(*zones, store, logger)
 
+	if err := storage.StartWatcher(ctx, *zones, store, logger); err != nil {
+		logger.Error("failed to start zone file watcher", "directory", *zones, "error", err)
+		os.Exit(1)
+	}
+
 	proc := dnsproc.New(store)
 	stats := telemetry.New()
 
