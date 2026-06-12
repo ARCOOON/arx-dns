@@ -22,6 +22,12 @@ type Config struct {
 	Zones     ZonesConfig     `toml:"zones"`
 	Recursive RecursiveConfig `toml:"recursive"`
 	Firewall  FirewallConfig  `toml:"firewall"`
+	Security  SecurityConfig  `toml:"security"`
+}
+
+// SecurityConfig controls DNSSEC and related validation policies.
+type SecurityConfig struct {
+	DNSSECValidation bool `toml:"dnssec_validation"`
 }
 
 // ServerConfig controls the DNS listener bind address and reactor sizing.
@@ -113,6 +119,9 @@ func Default() Config {
 		Firewall: FirewallConfig{
 			BlocklistsDirectory: defaultBlocklistsDir,
 			BlockAction:         defaultBlockAction,
+		},
+		Security: SecurityConfig{
+			DNSSECValidation: true,
 		},
 	}
 }
