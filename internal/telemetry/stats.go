@@ -10,6 +10,8 @@ type Stats struct {
 	totalQueries         atomic.Uint64
 	udpQueries           atomic.Uint64
 	tcpQueries           atomic.Uint64
+	dotQueries           atomic.Uint64
+	dohQueries           atomic.Uint64
 	droppedPackets       atomic.Uint64
 	parseErrors          atomic.Uint64
 	writeErrors          atomic.Uint64
@@ -36,6 +38,8 @@ type Snapshot struct {
 	TotalQueries         uint64 `json:"total_queries"`
 	UDPQueries           uint64 `json:"udp_queries"`
 	TCPQueries           uint64 `json:"tcp_queries"`
+	DoTQueries           uint64 `json:"dot_queries"`
+	DoHQueries           uint64 `json:"doh_queries"`
 	DroppedPackets       uint64 `json:"dropped_packets"`
 	ParseErrors          uint64 `json:"parse_errors"`
 	WriteErrors          uint64 `json:"write_errors"`
@@ -58,6 +62,8 @@ func (s *Stats) Snapshot() Snapshot {
 		TotalQueries:         s.totalQueries.Load(),
 		UDPQueries:           s.udpQueries.Load(),
 		TCPQueries:           s.tcpQueries.Load(),
+		DoTQueries:           s.dotQueries.Load(),
+		DoHQueries:           s.dohQueries.Load(),
 		DroppedPackets:       s.droppedPackets.Load(),
 		ParseErrors:          s.parseErrors.Load(),
 		WriteErrors:          s.writeErrors.Load(),
@@ -91,6 +97,16 @@ func (s *Stats) IncUDPQuery() {
 
 func (s *Stats) IncTCPQuery() {
 	s.tcpQueries.Add(1)
+	s.IncTotalQuery()
+}
+
+func (s *Stats) IncDoTQuery() {
+	s.dotQueries.Add(1)
+	s.IncTotalQuery()
+}
+
+func (s *Stats) IncDoHQuery() {
+	s.dohQueries.Add(1)
 	s.IncTotalQuery()
 }
 
