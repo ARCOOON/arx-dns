@@ -1,0 +1,11 @@
+$TTL 300
+@       IN  SOA     ns1.arx.local. admin.arx.local. (
+                    2024061201 ; serial
+                    3600       ; refresh
+                    600        ; retry
+                    86400      ; expire
+                    300        ; minimum
+                    )
+router  IN  A       10.10.0.1
+router  IN  AAAA    fd00::1
+www     IN  CNAME   router.arx.local.
