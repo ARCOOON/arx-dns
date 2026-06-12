@@ -1,9 +1,12 @@
 package dnsproc
 
 import (
+	"net/netip"
+
 	mdns "github.com/miekg/dns"
 
 	"github.com/ARCOOON/arx-dns/internal/storage"
+	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
 
 const (
@@ -17,19 +20,25 @@ const (
 type Processor struct {
 	store     *storage.Memory
 	forwarder *Forwarder
+	cache     *storage.ResponseCache
+	stats     *telemetry.Stats
+	acl       TrustedChecker
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker) *Processor {
 	return &Processor{
 		store:     store,
 		forwarder: forwarder,
+		cache:     cache,
+		stats:     stats,
+		acl:       acl,
 	}
 }
 
-// Response parses a DNS query payload and returns an authoritative answer, a forwarded
-// recursive answer, or NXDOMAIN when the name is unknown and recursion is not requested.
-func (p *Processor) Response(payload []byte) ([]byte, error) {
+// Response parses a DNS query payload from client and returns an authoritative answer,
+// a forwarded recursive answer, or an appropriate error code.
+func (p *Processor) Response(client netip.Addr, payload []byte) ([]byte, error) {
 	if len(payload) < dnsHeaderSize || len(payload) > maxMessageSize {
 		return nil, mdns.ErrBuf
 	}
@@ -48,11 +57,17 @@ func (p *Processor) Response(payload []byte) ([]byte, error) {
 		return resp.Pack()
 	}
 
+	trusted := p.clientTrusted(client)
 	q := req.Question[0]
-	records, rcode, needsForward := p.resolveQuestion(q)
+	records, rcode, needsForward := p.resolveQuestion(q, trusted)
 
-	if needsForward && req.RecursionDesired && p.forwarder != nil {
-		return p.forwardQuery(req)
+	if needsForward && req.RecursionDesired {
+		if !trusted {
+			return p.refusedResponse(req)
+		}
+		if p.forwarder != nil {
+			return p.forwardQuery(req)
+		}
 	}
 
 	resp := new(mdns.Msg)
@@ -64,7 +79,43 @@ func (p *Processor) Response(payload []byte) ([]byte, error) {
 	return resp.Pack()
 }
 
+func (p *Processor) clientTrusted(client netip.Addr) bool {
+	if p.acl == nil {
+		return true
+	}
+	return p.acl.Trusted(client)
+}
+
+func (p *Processor) refusedResponse(req *mdns.Msg) ([]byte, error) {
+	if p.stats != nil {
+		p.stats.IncACLRejected()
+	}
+
+	resp := new(mdns.Msg)
+	resp.SetReply(req)
+	resp.RecursionAvailable = true
+	resp.Authoritative = false
+	resp.Rcode = mdns.RcodeRefused
+	return resp.Pack()
+}
+
 func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
+	key := storage.QuestionKey(req.Question[0])
+
+	if p.cache != nil {
+		if cached, ok := p.cache.Get(key); ok {
+			if p.stats != nil {
+				p.stats.IncCacheHit()
+			}
+			cached.SetReply(req)
+			cached.RecursionAvailable = true
+			return cached.Pack()
+		}
+		if p.stats != nil {
+			p.stats.IncCacheMiss()
+		}
+	}
+
 	resp, err := p.forwarder.Exchange(req)
 	if err != nil {
 		fallback := new(mdns.Msg)
@@ -75,19 +126,23 @@ func (p *Processor) forwardQuery(req *mdns.Msg) ([]byte, error) {
 		return fallback.Pack()
 	}
 
+	if p.cache != nil {
+		p.cache.Set(key, resp)
+	}
+
 	resp.SetReply(req)
 	resp.RecursionAvailable = true
 	return resp.Pack()
 }
 
-func (p *Processor) resolveQuestion(q mdns.Question) (records []mdns.RR, rcode int, needsForward bool) {
+func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []mdns.RR, rcode int, needsForward bool) {
 	switch q.Qtype {
 	case mdns.TypeA, mdns.TypeAAAA:
-		records, rcode = p.resolveAddress(q.Name, q.Qtype)
+		records, rcode = p.resolveAddress(q.Name, q.Qtype, trusted)
 		needsForward = rcode == mdns.RcodeNameError
 	default:
 		var status storage.LookupStatus
-		records, status = p.store.Lookup(q.Name, q.Qtype)
+		records, status = p.authoritativeLookup(q.Name, q.Qtype, trusted)
 		switch status {
 		case storage.LookupFound:
 			rcode = mdns.RcodeSuccess
@@ -101,9 +156,19 @@ func (p *Processor) resolveQuestion(q mdns.Question) (records []mdns.RR, rcode i
 	return records, rcode, needsForward
 }
 
+func (p *Processor) authoritativeLookup(name string, qtype uint16, trusted bool) ([]mdns.RR, storage.LookupStatus) {
+	if trusted {
+		records, status := p.store.LookupInternal(name, qtype)
+		if status != storage.LookupNotFound {
+			return records, status
+		}
+	}
+	return p.store.LookupPublic(name, qtype)
+}
+
 // resolveAddress returns A or AAAA records, following CNAME chains when needed.
-func (p *Processor) resolveAddress(name string, qtype uint16) ([]mdns.RR, int) {
-	records, status := p.store.Lookup(name, qtype)
+func (p *Processor) resolveAddress(name string, qtype uint16, trusted bool) ([]mdns.RR, int) {
+	records, status := p.authoritativeLookup(name, qtype, trusted)
 	switch status {
 	case storage.LookupFound:
 		return records, mdns.RcodeSuccess
@@ -111,13 +176,13 @@ func (p *Processor) resolveAddress(name string, qtype uint16) ([]mdns.RR, int) {
 		return nil, mdns.RcodeNameError
 	}
 
-	return p.followCNAMEChain(name, qtype)
+	return p.followCNAMEChain(name, qtype, trusted)
 }
 
 // followCNAMEChain walks CNAME aliases until the requested address type is found,
-// the chain ends, or a loop/depth limit is hit. Each store.Lookup loads the
-// active radix tree pointer atomically, so concurrent callers need no locks.
-func (p *Processor) followCNAMEChain(startName string, qtype uint16) ([]mdns.RR, int) {
+// the chain ends, or a loop/depth limit is hit. Each lookup loads the active radix
+// tree pointer atomically, so concurrent callers need no locks.
+func (p *Processor) followCNAMEChain(startName string, qtype uint16, trusted bool) ([]mdns.RR, int) {
 	answer := make([]mdns.RR, 0, 4)
 	visited := make(map[string]struct{}, maxCNAMEChainDepth)
 	current := storage.NormalizeName(startName)
@@ -128,7 +193,7 @@ func (p *Processor) followCNAMEChain(startName string, qtype uint16) ([]mdns.RR,
 		}
 		visited[current] = struct{}{}
 
-		records, status := p.store.Lookup(current, qtype)
+		records, status := p.authoritativeLookup(current, qtype, trusted)
 		switch status {
 		case storage.LookupFound:
 			return append(answer, records...), mdns.RcodeSuccess
@@ -139,7 +204,7 @@ func (p *Processor) followCNAMEChain(startName string, qtype uint16) ([]mdns.RR,
 			return nil, mdns.RcodeNameError
 		}
 
-		cnames, status := p.store.Lookup(current, mdns.TypeCNAME)
+		cnames, status := p.authoritativeLookup(current, mdns.TypeCNAME, trusted)
 		if status != storage.LookupFound {
 			return answer, mdns.RcodeSuccess
 		}
