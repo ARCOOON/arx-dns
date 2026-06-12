@@ -24,6 +24,7 @@ func main() {
 	loops := flag.Int("loops", 0, "number of gnet event loops (0 uses all CPU cores)")
 	zones := flag.String("zones", "./zones", "directory containing BIND .zone files")
 	upstreams := flag.String("upstreams", "1.1.1.1:53,1.0.0.1:53", "comma-separated upstream DNS resolvers for recursive forwarding")
+	trustedSubnets := flag.String("trusted-subnets", "127.0.0.0/8,10.0.0.0/8,192.168.0.0/16", "comma-separated CIDR prefixes allowed to use recursive forwarding")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -43,14 +44,26 @@ func main() {
 
 	stats := telemetry.New()
 
+	acl, err := network.ParseACL(*trustedSubnets)
+	if err != nil {
+		logger.Error("invalid trusted subnets configuration", "trusted_subnets", *trustedSubnets, "error", err)
+		os.Exit(1)
+	}
+
 	upstreamAddrs, err := dnsproc.ParseUpstreams(*upstreams)
 	if err != nil {
 		logger.Error("invalid upstream configuration", "upstreams", *upstreams, "error", err)
 		os.Exit(1)
 	}
 
+	responseCache, err := storage.NewResponseCache()
+	if err != nil {
+		logger.Error("failed to initialize response cache", "error", err)
+		os.Exit(1)
+	}
+
 	forwarder := dnsproc.NewForwarder(upstreamAddrs, stats)
-	proc := dnsproc.New(store, forwarder)
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl)
 
 	cfg := network.Config{
 		Address:          net.JoinHostPort(*listen, strconv.Itoa(*port)),
@@ -79,6 +92,7 @@ func main() {
 		"address", cfg.Address,
 		"event_loops", cfg.ReusePortSockets,
 		"upstreams", upstreamAddrs,
+		"trusted_subnets", *trustedSubnets,
 	)
 	startReactor("udp", udpReactor.Run)
 	startReactor("tcp", tcpReactor.Run)
