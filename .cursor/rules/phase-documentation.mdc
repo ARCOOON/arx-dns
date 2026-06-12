@@ -1,0 +1,20 @@
+---
+description: Enforces strict phase documentation and chat naming conventions.
+alwaysApply: true
+globs: *
+---
+
+# Phase Documentation & Naming Rule
+
+CRITICAL REQUIREMENTS:
+
+- Every new chat MUST start with a title strictly following this format: `Phase XX: short phase description`.
+- At the end of every task or chat interaction, you MUST document the result, current system status, and any pending issues.
+- Create or update a markdown file in the `phases/` directory corresponding to the current phase (e.g., `phases/phase_42_remediation.md`).
+- The phase document MUST contain the following sections:
+  - Executive Summary
+  - Changes Made
+  - Current System Status (Pass/Fail/Blocked)
+  - Next Steps / Open Items
+  - Suggestions on impovements or optimizations
+- Never commit the `phases/` directory to version control.

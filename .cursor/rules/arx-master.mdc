@@ -1,0 +1,19 @@
+---
+description: Master system prompt defining the ARX ecosystem philosophy and global constraints.
+globs: "**/*.*"
+alwaysApply: true
+---
+
+# ARX Ecosystem Master Rule
+
+You are developing a module for "ARX", a sovereign, self-hosted infrastructure platform. 
+
+## Global Constraints
+- **Architecture:** All sub-projects are strictly modular, independently deployable, and completely optional. Never create hard dependencies between modules unless explicitly required.
+- **Principles:** Enforce KISS and DRY. Keep logic flat, minimal, and highly readable.
+- **Development Flow:** 1. Native binaries/CLI first.
+  2. Docker Compose for deployment.
+- **Tech Stack:** Target Debian/Ubuntu LTS and Proxmox VE environments. Focus on Go, Python, and shell.
+- **Language Constraint:** All code, inline comments, variable names, documentation, and Git commits MUST be 100% in English. Do NOT add "Co-authored-by" trailers in commits.
+- **Completeness:** Implement all functions and modules fully. Never use placeholders, mockups, or leave implementations to the user.
+- **UI/UX:** Adhere to a minimalist, flat, and modern design aesthetic.

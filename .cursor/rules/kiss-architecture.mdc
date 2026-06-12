@@ -1,0 +1,30 @@
+---
+description: Core architectural philosophy enforcing KISS principles, strict production-readiness, and methodical test tracking.
+globs: "**/*.*"
+alwaysApply: true
+---
+
+# KISS Architecture & Pragmatic Execution
+
+## Core Philosophy
+
+Keep it simple, stupid. Optimize for absolute readability, flat structures, and straightforward logic. Eliminate unnecessary abstractions and theoretical "future-proofing". Code must be as simple as possible, but no simpler. Apply DRY (Don't Repeat Yourself) principles aggressively.
+
+## Execution Directives
+
+1. **Simplicity over Cleverness**
+   - Write readable, straightforward code over complex, "clever" one-liners.
+   - Do not over-architect or introduce unnecessary design patterns unless the specific problem strictly demands it.
+2. **Uncompromising Security & Best Practices**
+   - Always follow established security baselines (input sanitization, safe concurrent state management).
+   - Base all logic on the latest stable documentation and modern APIs. Reject deprecated approaches.
+3. **Zero Placeholders**
+   - Always implement all functions and modules completely.
+   - Never leave simulations, partial logic, or `// TODO` blocks. Deliver production-ready, working code.
+4. **Documentation & Test Tracking**
+   - Document everything built or modified clearly and concisely.
+   - Before executing testing phases or complex tasks, generate a strict Markdown TODO list containing all required steps. Systematically check these off during execution.
+5. **Strict Language Protocol**
+   - ALL code, inline comments, variable names, docstrings, and terminal outputs MUST be strictly in English.
+6. **Direct Communication**
+   - Provide direct, concise technical feedback. Do not sugar-coat problems or output unnecessary conversational filler.

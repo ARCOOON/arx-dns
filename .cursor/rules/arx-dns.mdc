@@ -1,0 +1,17 @@
+---
+description: Core architectural constraints for the arx-dns enterprise server.
+globs: "*.go"
+alwaysApply: true
+---
+
+# arx-dns Architecture Rules
+
+You are developing `arx-dns`, a high-performance, universal DNS server built from scratch in Go.
+
+## Core Directives
+- **Performance First:** Focus on zero-allocation packet parsing and system-level I/O optimization.
+- **No Heavy Frameworks:** Rely strictly on the Go standard library (`net`) and `golang.org/x/sys/unix` for advanced socket control.
+- **Protocol Compliance:** Adhere strictly to RFC 1035 for binary DNS packet parsing and serialization.
+- **Concurrency:** Design for millions of QPS using non-blocking, event-driven architectures and kernel-level load balancing (`SO_REUSEPORT`).
+- **Language & Completeness:** ALL code and comments MUST be in English. Implement all functions entirely. Never leave placeholders or `// TODO` blocks.
+- **Layout:** Follow standard Go project structure (`cmd/arx-dns/`, `internal/network/`, `internal/protocol/`).

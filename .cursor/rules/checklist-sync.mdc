@@ -1,0 +1,20 @@
+---
+description: Enforces continuous tracking and updating of the project roadmap, features, and task status in CHECKLIST.md.
+globs: "**/*.*"
+alwaysApply: true
+---
+
+# Mandatory Checklist Synchronization
+
+The project state must always be accurately reflected in the `CHECKLIST.md` file. 
+
+## Execution Workflow
+
+- **Instant Tracking:** Every time a prompt is processed, a feature is implemented, or a bug is fixed, you MUST immediately update `CHECKLIST.md`.
+- **Status Management:** Maintain clear states for all items:
+  - `[ ]` Open / Pending
+  - `[~]` In Progress (actively being worked on in the current prompt)
+  - `[x]` Done / Completed
+- **Proactive Updates:** Do not wait for explicit instructions to update the checklist. Treat it as the single source of truth for the project roadmap.
+- **Formatting:** Use standard markdown checklists. Keep descriptions concise and technical.
+- **Language Constraint:** All updates, task descriptions, and roadmap entries MUST be written strictly in English.

@@ -1,0 +1,31 @@
+---
+description: Enforces mandatory documentation updates immediately following any codebase modification.
+globs: "**/*.*"
+alwaysApply: true
+---
+
+# Mandatory Continuous Documentation Synchronization
+
+Code and documentation must never drift. You are strictly forbidden from finalizing a prompt or code change without validating and updating the corresponding project documentation.
+
+## Core Mandate
+
+- **Synchronize Instantly:** Every time you modify, add, or deprecate code (functions, CLI commands, API endpoints, configurations), you MUST immediately update all relevant markdown files (e.g., `README.md`, `docs/**/*.md`).
+- **Proactive Execution:** Documentation synchronization is a mandatory part of the change lifecycle. Do not wait for explicit instructions to update docs.
+
+## Execution Workflow
+
+1. **Analyze:** Identify the impact of code modifications on the system architecture, CLI commands, or API surface.
+2. **Locate Docs:** Scan the documentation directories and `README.md` for sections explaining the modified component.
+3. **Update In-Place:** Rewrite or patch the documentation files immediately.
+4. **No Placeholders:** Write out the full structures, updated fields, and exact CLI flags. Never use `// TODO` or `...`.
+5. **Format Enforcement:** Use markdown tables, bullet lists, and standard code blocks for technical schemas and API references.
+
+## Verification Checklist
+
+Before finalizing the response, ensure:
+
+- Obsolete references in `README.md` are removed or updated.
+- CLI/Command documentation reflects correct flags, arguments, and behaviors.
+- API payloads, endpoint paths, and data models are adjusted using precise table schemas.
+- All documentation is written strictly in English.
