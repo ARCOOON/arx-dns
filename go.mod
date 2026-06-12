@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/armon/go-radix v1.0.0
+	github.com/dgraph-io/ristretto v0.2.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/miekg/dns v1.1.72
 	github.com/panjf2000/gnet/v2 v2.9.8
@@ -11,7 +12,6 @@ require (
 
 require (
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
-	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/panjf2000/ants/v2 v2.12.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
