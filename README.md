@@ -304,7 +304,50 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `dnssec_validations_passed` | Forwarded upstream responses that passed DNSSEC signature verification  |
 | `dnssec_validations_failed` | Forwarded upstream responses rejected as BOGUS after DNSSEC checks      |
 
-`Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`).
+`Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`). The same counters are exported in Prometheus text format at `GET /metrics` (no authentication required).
+
+### Prometheus metrics
+
+`internal/telemetry.StatsCollector` implements the Prometheus `Collector` interface. On each scrape it reads the current `sync/atomic` counter values via `Stats.Snapshot()`—the DNS hot path only performs lock-free increments and is never touched by the exporter.
+
+| Metric                                   | Description                                         |
+| ---------------------------------------- | --------------------------------------------------- |
+| `arxdns_queries_total`                   | Total DNS queries processed                         |
+| `arxdns_udp_queries_total`               | UDP query count                                     |
+| `arxdns_tcp_queries_total`               | TCP query count                                     |
+| `arxdns_dot_queries_total`               | DNS-over-TLS query count                            |
+| `arxdns_doh_queries_total`               | DNS-over-HTTPS query count                          |
+| `arxdns_dropped_packets_total`           | Parse failures, invalid frames, and write errors    |
+| `arxdns_parse_errors_total`              | DNS unpack failures                                 |
+| `arxdns_write_errors_total`              | Response send failures                              |
+| `arxdns_refused_answers_total`           | REFUSED responses sent                              |
+| `arxdns_authoritative_answers_total`     | Authoritative NOERROR / NODATA responses            |
+| `arxdns_nxdomain_answers_total`          | NXDOMAIN responses sent                             |
+| `arxdns_forwarded_queries_total`         | Recursive queries forwarded upstream                |
+| `arxdns_upstream_failures_total`         | Recursive queries where all upstreams failed        |
+| `arxdns_cache_hits_total`                | Forwarded queries served from the response cache    |
+| `arxdns_cache_misses_total`              | Forwarded queries that missed the response cache    |
+| `arxdns_negative_cache_hits_total`       | Forwarded NXDOMAIN / NODATA answers from cache      |
+| `arxdns_acl_rejected_total`              | Recursive queries denied (untrusted client IP)      |
+| `arxdns_truncated_responses_total`       | UDP responses truncated with TC set                 |
+| `arxdns_tcp_timeouts_total`              | TCP connections closed due to read-frame timeout    |
+| `arxdns_firewall_blocked_total`          | Queries blocked by the DNS firewall blocklist       |
+| `arxdns_dnssec_validations_passed_total` | Forwarded responses that passed DNSSEC verification |
+| `arxdns_dnssec_validations_failed_total` | Forwarded responses rejected as BOGUS               |
+
+Example Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: arx-dns
+    static_configs:
+      - targets: ['127.0.0.1:8080']
+    metrics_path: /metrics
+```
+
+```bash
+curl -s http://127.0.0.1:8080/metrics
+```
 
 ### Management API
 
@@ -313,6 +356,7 @@ A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It
 | Endpoint                       | Method | Auth   | Description                                                                   |
 | ------------------------------ | ------ | ------ | ----------------------------------------------------------------------------- |
 | `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                     |
+| `/metrics`                     | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                  |
 | `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                               |
 | `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)           |
 | `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                            |

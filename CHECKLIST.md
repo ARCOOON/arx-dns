@@ -97,10 +97,6 @@
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
 - [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.
-- [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
-  - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
-  - [ ] Latency histograms.
-  - [ ] Cache hit/miss ratios.
-  - [ ] Error code rates (`NXDOMAIN`, `SERVFAIL`, `REFUSED`).
+- [x] **Prometheus Metrics Exporter (Phase 20):** Native `GET /metrics` endpoint (unauthenticated) exposing all `telemetry.Stats` atomic counters via a custom Prometheus `Collector` that reads values only on scrape; `promhttp` handler on the management API listener.
 - [ ] **Structured Logging:** JSON-formatted output to `stdout` or `syslog` with adjustable verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`).
 - [x] **Audit Trail:** Immutable logging of all administrative actions and API mutations (`POST`/`DELETE` audit middleware with client IP, zone, action, status) (Phase 18).
