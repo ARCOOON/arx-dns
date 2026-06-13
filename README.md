@@ -24,7 +24,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                  |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                     |
-| `internal/api/`       | Management HTTP API for health checks, telemetry exposure, and zone reload                                                                                                                         |
+| `internal/api/`       | Management HTTP API for health checks, telemetry exposure, zone listing, record CRUD, and zone reload                                                                                              |
 
 ## Build & Run
 
@@ -305,18 +305,44 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 
 A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication.
 
-| Endpoint               | Method | Auth   | Description                                        |
-| ---------------------- | ------ | ------ | -------------------------------------------------- |
-| `/health`              | GET    | None   | Liveness probe; returns `{"status":"ok"}`          |
-| `/api/v1/stats`        | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters    |
-| `/api/v1/zones/reload` | POST   | Bearer | Force zone reload (same logic as fsnotify watcher) |
+| Endpoint                       | Method | Auth   | Description                                                                   |
+| ------------------------------ | ------ | ------ | ----------------------------------------------------------------------------- |
+| `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                     |
+| `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                               |
+| `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)           |
+| `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                            |
+| `/api/v1/zones/{zone}/records` | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file      |
+| `/api/v1/zones/{zone}/records` | DELETE | Bearer | Remove a matching DNS record from the zone; persists to the BIND `.zone` file |
+
+Record create/delete payloads use JSON:
+
+```json
+{"name": "test", "type": "A", "ttl": 3600, "value": "10.0.0.5", "view": "public"}
+```
+
+| Field   | Required | Description                                                                |
+| ------- | -------- | -------------------------------------------------------------------------- |
+| `name`  | Yes      | Owner name relative to the zone apex (`@`, `www`, or FQDN)                 |
+| `type`  | Yes      | DNS record type (`A`, `AAAA`, `CNAME`, `TXT`, `NS`, `MX`, `PTR`, `SRV`, …) |
+| `ttl`   | No       | TTL in seconds (defaults to `300` on create)                               |
+| `value` | Yes      | RDATA string (e.g. IPv4 for `A`, target hostname for `CNAME`)              |
+| `view`  | No       | `public` (default) or `internal` for split-DNS view selection              |
+
+Mutations clone the active radix tree, apply the change, atomically swap the tree pointer (lock-free for DNS queries), then rewrite the corresponding `.zone` file on disk via atomic rename.
 
 Configure the listener and token under `[api]` in `config.toml`. The default bind address is `127.0.0.1:8080` so the API is not exposed on all interfaces. For Docker or remote access, set `api.listen = '0.0.0.0:8080'` and publish the port in Compose.
 
 ```bash
 curl -s http://127.0.0.1:8080/health
 curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/stats
+curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones
 curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones/reload
+curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
+  -d '{"name":"test","type":"A","ttl":3600,"value":"10.0.0.5"}' \
+  http://127.0.0.1:8080/api/v1/zones/arx.local/records
+curl -s -X DELETE -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
+  -d '{"name":"test","type":"A","value":"10.0.0.5"}' \
+  http://127.0.0.1:8080/api/v1/zones/arx.local/records
 ```
 
 The API shuts down gracefully with the DNS reactors on `SIGINT` or `SIGTERM`.
