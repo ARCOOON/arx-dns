@@ -32,8 +32,10 @@ func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 		logger = slog.Default()
 	}
 
-	publicTree, publicLoaded, publicSkipped := buildTreeFromDir(dir, logger)
-	internalTree, internalLoaded, internalSkipped := buildTreeFromDir(filepath.Join(dir, internalViewDir), logger)
+	store.ResetRegistry()
+
+	publicTree, publicLoaded, publicSkipped := buildTreeFromDir(dir, ViewPublic, store, logger)
+	internalTree, internalLoaded, internalSkipped := buildTreeFromDir(filepath.Join(dir, internalViewDir), ViewInternal, store, logger)
 	if internalTree == nil {
 		internalTree = radix.New()
 	}
@@ -53,7 +55,7 @@ func LoadZonesFromDir(dir string, store *Memory, logger *slog.Logger) {
 }
 
 // buildTreeFromDir reads *.zone files from dir and returns a radix tree.
-func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
+func buildTreeFromDir(dir string, view ZoneView, store *Memory, logger *slog.Logger) (*radix.Tree, int, int) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -77,10 +79,14 @@ func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 		}
 
 		path := filepath.Join(dir, entry.Name())
-		if err := loadZoneFile(path, tree, logger); err != nil {
+		origin, err := loadZoneFile(path, tree, logger)
+		if err != nil {
 			logger.Error("skipped malformed zone file", "path", path, "error", err)
 			skipped++
 			continue
+		}
+		if store != nil {
+			store.RegisterZone(origin, view, path)
 		}
 		loaded++
 	}
@@ -88,15 +94,15 @@ func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 	return tree, loaded, skipped
 }
 
-func loadZoneFile(path string, tree *radix.Tree, logger *slog.Logger) error {
+func loadZoneFile(path string, tree *radix.Tree, logger *slog.Logger) (string, error) {
 	origin, err := resolveZoneOrigin(path)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("open zone file: %w", err)
+		return "", fmt.Errorf("open zone file: %w", err)
 	}
 	defer f.Close()
 
@@ -107,11 +113,11 @@ func loadZoneFile(path string, tree *radix.Tree, logger *slog.Logger) error {
 		count++
 	}
 	if err := parser.Err(); err != nil {
-		return fmt.Errorf("parse zone (origin %s): %w", origin, err)
+		return "", fmt.Errorf("parse zone (origin %s): %w", origin, err)
 	}
 
 	logger.Info("loaded zone file", "path", path, "origin", origin, "records", count)
-	return nil
+	return origin, nil
 }
 
 func resolveZoneOrigin(path string) (string, error) {

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/armon/go-radix"
@@ -27,14 +28,34 @@ const (
 type Memory struct {
 	public   atomic.Value // holds *radix.Tree
 	internal atomic.Value // holds *radix.Tree
+	registry *zoneRegistry
+	mutateMu sync.Mutex
 }
 
 // NewMemory creates an empty in-memory store with public and internal views.
 func NewMemory() *Memory {
-	m := &Memory{}
+	m := &Memory{registry: newZoneRegistry()}
 	m.public.Store(radix.New())
 	m.internal.Store(radix.New())
 	return m
+}
+
+// ResetRegistry clears zone metadata. It is called before a full directory reload.
+func (m *Memory) ResetRegistry() {
+	if m == nil || m.registry == nil {
+		return
+	}
+	m.registry.mu.Lock()
+	defer m.registry.mu.Unlock()
+	m.registry.byKey = make(map[string]zoneRecord)
+	m.registry.origin = make(map[string]struct{})
+}
+
+func (m *Memory) treeForView(view ZoneView) *radix.Tree {
+	if view == ViewInternal {
+		return m.internalTree()
+	}
+	return m.publicTree()
 }
 
 // SwapPublicTree atomically replaces the public-view radix tree.
