@@ -23,6 +23,14 @@ type Config struct {
 	Recursive RecursiveConfig `toml:"recursive"`
 	Firewall  FirewallConfig  `toml:"firewall"`
 	Security  SecurityConfig  `toml:"security"`
+	RateLimit RateLimitConfig `toml:"rate_limit"`
+}
+
+// RateLimitConfig controls per-client-IP response rate limiting (RRL).
+type RateLimitConfig struct {
+	Enabled           bool `toml:"enabled"`
+	RequestsPerSecond int  `toml:"requests_per_second"`
+	Burst             int  `toml:"burst"`
 }
 
 // SecurityConfig controls DNSSEC and related validation policies.
@@ -86,6 +94,8 @@ const (
 	defaultUpstreamSecondary = "1.0.0.1:53"
 	defaultAPIListen         = "127.0.0.1:8080"
 	defaultAPIAuthToken      = "dev-token-change-me"
+	defaultRateLimitRPS      = 100
+	defaultRateLimitBurst    = 200
 )
 
 // Default returns a Config populated with the same defaults as the legacy CLI flags.
@@ -124,6 +134,11 @@ func Default() Config {
 		},
 		Security: SecurityConfig{
 			DNSSECValidation: true,
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:           true,
+			RequestsPerSecond: defaultRateLimitRPS,
+			Burst:             defaultRateLimitBurst,
 		},
 	}
 }
@@ -218,6 +233,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.API.AuthToken) == "" {
 		c.API.AuthToken = def.API.AuthToken
 	}
+	if c.RateLimit.RequestsPerSecond == 0 {
+		c.RateLimit.RequestsPerSecond = def.RateLimit.RequestsPerSecond
+	}
+	if c.RateLimit.Burst == 0 {
+		c.RateLimit.Burst = def.RateLimit.Burst
+	}
 }
 
 // Validate checks that all configuration fields are usable at runtime.
@@ -249,7 +270,23 @@ func (c Config) Validate() error {
 	if err := c.validateAPI(); err != nil {
 		return err
 	}
+	if err := c.validateRateLimit(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (c Config) validateRateLimit() error {
+	if !c.RateLimit.Enabled {
+		return nil
+	}
+	if c.RateLimit.RequestsPerSecond < 1 {
+		return errors.New("rate_limit.requests_per_second must be at least 1 when rate limiting is enabled")
+	}
+	if c.RateLimit.Burst < 1 {
+		return errors.New("rate_limit.burst must be at least 1 when rate limiting is enabled")
+	}
 	return nil
 }
 
