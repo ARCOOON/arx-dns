@@ -19,7 +19,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                               |
 | `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                             |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, and source-IP ACL matching                                                                                |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                    |
 | `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                  |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                |
@@ -116,6 +116,11 @@ block_action = 'NXDOMAIN'
 [security]
 dnssec_validation = true
 
+[rate_limit]
+enabled = true
+requests_per_second = 100
+burst = 200
+
 [tls]
 cert_file = './certs/server.crt'
 key_file = './certs/server.key'
@@ -131,25 +136,28 @@ tls_cert = './certs/api.crt'
 tls_key = './certs/api.key'
 ```
 
-| Section / Key                   | Default                                       | Description                                                                                 |
-| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `server.listen`                 | `0.0.0.0`                                     | IP address to bind to                                                                       |
-| `server.port`                   | `53`                                          | UDP/TCP port to listen on                                                                   |
-| `server.event_loops`            | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                      |
-| `tls.cert_file`                 | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH               |
-| `tls.key_file`                  | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH              |
-| `listeners.dot`                 | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                      |
-| `listeners.doh`                 | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                             |
-| `api.listen`                    | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security               |
-| `api.auth_token`                | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                          |
-| `api.tls_cert`                  | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`         |
-| `api.tls_key`                   | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`        |
-| `zones.directory`               | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
-| `recursive.upstreams`           | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
-| `recursive.trusted_subnets`     | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
-| `firewall.blocklists_directory` | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                     |
-| `firewall.block_action`         | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                 |
-| `security.dnssec_validation`    | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                |
+| Section / Key                    | Default                                       | Description                                                                                 |
+| -------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                       |
+| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                   |
+| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                      |
+| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH               |
+| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH              |
+| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                      |
+| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                             |
+| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security               |
+| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                          |
+| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`         |
+| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`        |
+| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
+| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
+| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
+| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                     |
+| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                 |
+| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                |
+| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                           |
+| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                       |
+| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                         |
 
 Example:
 
@@ -222,6 +230,16 @@ dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`recursive.upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, and class. On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache, then returned to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
 When `security.dnssec_validation` is enabled (default), upstream requests include the EDNS **DO (DNSSEC OK)** bit so resolvers return `RRSIG` records alongside signed answers. If the response contains `RRSIG` records, arx-dns fetches the zone `DNSKEY` set from upstream and verifies each signature with `github.com/miekg/dns`. Successful validation sets the **AD (Authenticated Data)** bit on the client response. Cryptographic validation failures (BOGUS data) are logged as security warnings, counted in `dnssec_validations_failed`, and answered with `SERVFAIL` without caching the upstream payload.
+
+### Response rate limiting (RRL)
+
+When `rate_limit.enabled` is true (default), every inbound DNS query is checked against a per-client-IP token bucket **before** any DNS parsing or processing. Limits use `golang.org/x/time/rate` with `requests_per_second` as the sustained rate and `burst` as the maximum short-term allowance. Exceeded queries are **silently dropped**—no `SERVFAIL`, `REFUSED`, or other response is sent, avoiding amplification during floods. Dropped queries increment the `rrl_dropped` counter (JSON API and `arxdns_rrl_dropped_total` Prometheus metric). Stale per-IP limiter entries are swept every five minutes to prevent unbounded memory growth.
+
+| Key                              | Default | Description                                            |
+| -------------------------------- | ------- | ------------------------------------------------------ |
+| `rate_limit.enabled`             | `true`  | Enable or disable RRL                                  |
+| `rate_limit.requests_per_second` | `100`   | Token bucket refill rate per client IP                 |
+| `rate_limit.burst`               | `200`   | Maximum burst per client IP before excess queries drop |
 
 For `A` and `AAAA` queries, the processor follows CNAME chains automatically: each alias is appended to the Answer section and the target name is looked up for the originally requested type. Chains are limited to 8 hops with visited-name loop detection; loops or excessive depth return `SERVFAIL`. Direct `CNAME` queries return only the alias record without following the chain. All lookups read the active radix tree via `sync/atomic.Value` without locks.
 
@@ -303,6 +321,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `firewall_blocked`          | Queries blocked by the DNS firewall blocklist engine                    |
 | `dnssec_validations_passed` | Forwarded upstream responses that passed DNSSEC signature verification  |
 | `dnssec_validations_failed` | Forwarded upstream responses rejected as BOGUS after DNSSEC checks      |
+| `rrl_dropped`               | Queries silently dropped by per-client-IP response rate limiting        |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`). The same counters are exported in Prometheus text format at `GET /metrics` (no authentication required).
 
@@ -334,6 +353,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `arxdns_firewall_blocked_total`          | Queries blocked by the DNS firewall blocklist       |
 | `arxdns_dnssec_validations_passed_total` | Forwarded responses that passed DNSSEC verification |
 | `arxdns_dnssec_validations_failed_total` | Forwarded responses rejected as BOGUS               |
+| `arxdns_rrl_dropped_total`               | Queries silently dropped by response rate limiting  |
 
 Example Prometheus scrape config:
 
@@ -417,12 +437,12 @@ The API shuts down gracefully with the DNS reactors on `SIGINT` or `SIGTERM`.
 
 The project ships a [Dev Containers](https://containers.dev/) configuration for Linux-native DNS development (privileged port 53, `SO_REUSEPORT`, and low-level socket work).
 
-### Prerequisites
+### Development Prerequisites
 
 - Docker Engine with Linux container support
 - Visual Studio Code or Cursor with the **Dev Containers** extension
 
-### Quick Start
+### Development Quick Start
 
 1. Open the repository root in VS Code / Cursor.
 2. Run **Dev Containers: Reopen in Container** from the command palette.

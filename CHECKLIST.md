@@ -66,7 +66,7 @@
 
 ## 6. Defensive Security & Policy Enforcement
 
-- [ ] **Response Rate Limiting (RRL):** Mitigation of DNS amplification and reflection DDoS attacks via IP/subnet rate limits.
+- [x] **Response Rate Limiting (RRL):** Per-client-IP token-bucket rate limiting via `golang.org/x/time/rate`, silent packet drop on exceed (no SERVFAIL/REFUSED), configurable `[rate_limit]` section, stale-entry sweep, and `rrl_dropped` telemetry (Phase 21).
 - [ ] **Response Policy Zones (RPZ / DNS Firewall):** Real-time query matching against threat intelligence feeds (actions: Block, Drop, CNAME-Rewrite, NXDOMAIN).
   - [x] Flat-file blocklist engine with reversed-domain radix prefix matching, subdomain blocking, `NXDOMAIN` / `ZEROIP` actions, fsnotify hot-reload, and `firewall_blocked` telemetry (Phase 11).
 - [x] **Access Control Lists (ACLs):** Granular definitions for:
@@ -93,7 +93,7 @@
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, and DNSSEC validation pass/fail counters (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, and RRL-dropped queries (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
 - [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.
