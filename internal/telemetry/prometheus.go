@@ -52,6 +52,7 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "firewall_blocked_total", help: "Total number of queries blocked by the DNS firewall blocklist engine.", load: func(s Snapshot) float64 { return float64(s.FirewallBlocked) }},
 		{name: "dnssec_validations_passed_total", help: "Total number of forwarded upstream responses that passed DNSSEC signature verification.", load: func(s Snapshot) float64 { return float64(s.DNSSECValidationsPassed) }},
 		{name: "dnssec_validations_failed_total", help: "Total number of forwarded upstream responses rejected as BOGUS after DNSSEC checks.", load: func(s Snapshot) float64 { return float64(s.DNSSECValidationsFailed) }},
+		{name: "rrl_dropped_total", help: "Total number of DNS queries silently dropped by response rate limiting.", load: func(s Snapshot) float64 { return float64(s.RRLDropped) }},
 	}
 
 	descs := make(map[string]*prometheus.Desc, len(specs))

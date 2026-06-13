@@ -29,6 +29,7 @@ type Stats struct {
 	firewallBlocked         atomic.Uint64
 	dnssecValidationsPassed atomic.Uint64
 	dnssecValidationsFailed atomic.Uint64
+	rrlDropped              atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -60,6 +61,7 @@ type Snapshot struct {
 	FirewallBlocked         uint64 `json:"firewall_blocked"`
 	DNSSECValidationsPassed uint64 `json:"dnssec_validations_passed"`
 	DNSSECValidationsFailed uint64 `json:"dnssec_validations_failed"`
+	RRLDropped              uint64 `json:"rrl_dropped"`
 }
 
 // Snapshot returns the current counter values.
@@ -87,6 +89,7 @@ func (s *Stats) Snapshot() Snapshot {
 		FirewallBlocked:         s.firewallBlocked.Load(),
 		DNSSECValidationsPassed: s.dnssecValidationsPassed.Load(),
 		DNSSECValidationsFailed: s.dnssecValidationsFailed.Load(),
+		RRLDropped:              s.rrlDropped.Load(),
 	}
 }
 
@@ -187,4 +190,8 @@ func (s *Stats) IncDNSSECValidationPassed() {
 
 func (s *Stats) IncDNSSECValidationFailed() {
 	s.dnssecValidationsFailed.Add(1)
+}
+
+func (s *Stats) IncRRLDropped() {
+	s.rrlDropped.Add(1)
 }
