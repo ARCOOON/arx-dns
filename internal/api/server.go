@@ -44,6 +44,7 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, logge
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.Handle("GET /metrics", telemetry.MetricsHandler(stats))
 
 	auth := bearerAuth(cfg.API.AuthToken)
 	mux.Handle("GET /api/v1/stats", auth(http.HandlerFunc(s.handleStats)))
