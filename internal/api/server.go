@@ -54,7 +54,7 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, logge
 
 	s.server = &http.Server{
 		Addr:    cfg.API.Listen,
-		Handler: mux,
+		Handler: auditMiddleware(logger)(mux),
 	}
 
 	return s
@@ -67,7 +67,11 @@ func (s *Server) Handler() http.Handler {
 
 // Run starts the HTTP API until ctx is canceled.
 func (s *Server) Run(ctx context.Context) error {
-	s.logger.Info("management api listener started", "address", s.cfg.API.Listen)
+	tlsEnabled := s.cfg.APITLSEnabled()
+	s.logger.Info("management api listener started",
+		"address", s.cfg.API.Listen,
+		"tls", tlsEnabled,
+	)
 
 	go func() {
 		<-ctx.Done()
@@ -78,7 +82,12 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}()
 
-	err := s.server.ListenAndServe()
+	var err error
+	if tlsEnabled {
+		err = s.server.ListenAndServeTLS(s.cfg.API.TLSCert, s.cfg.API.TLSKey)
+	} else {
+		err = s.server.ListenAndServe()
+	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

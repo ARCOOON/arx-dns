@@ -28,8 +28,8 @@ func (s *Server) handleListZones(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	zone := strings.TrimSpace(r.PathValue("zone"))
-	if zone == "" {
-		writeJSONError(w, http.StatusBadRequest, "zone name is required")
+	if err := storage.ValidateZoneName(zone); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -56,13 +56,6 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hdr := rr.Header()
-	s.logger.Info("zone record created",
-		"zone", storage.NormalizeName(zone),
-		"view", view,
-		"name", hdr.Name,
-		"type", hdr.Rrtype,
-	)
-
 	writeJSON(w, http.StatusCreated, recordResponse{
 		Status:  "created",
 		Message: "record added",
@@ -73,8 +66,8 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 	zone := strings.TrimSpace(r.PathValue("zone"))
-	if zone == "" {
-		writeJSONError(w, http.StatusBadRequest, "zone name is required")
+	if err := storage.ValidateZoneName(zone); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -102,13 +95,6 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-
-	s.logger.Info("zone record deleted",
-		"zone", storage.NormalizeName(zone),
-		"view", view,
-		"name", in.Name,
-		"type", strings.ToUpper(strings.TrimSpace(in.Type)),
-	)
 
 	writeJSON(w, http.StatusOK, recordResponse{
 		Status:  "deleted",
