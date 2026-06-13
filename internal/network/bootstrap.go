@@ -15,13 +15,13 @@ type Reactors struct {
 }
 
 // NewReactors creates UDP and TCP reactors using listener settings from cfg.
-func NewReactors(cfg config.Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor) Reactors {
+func NewReactors(cfg config.Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor, rrl *RateLimiter) Reactors {
 	listener := Config{
 		Address:          cfg.ListenAddress(),
 		ReusePortSockets: cfg.Server.EventLoops,
 	}
 	return Reactors{
-		UDP: NewUDPReactor(listener, logger, stats, proc),
-		TCP: NewTCPReactor(listener, logger, stats, proc),
+		UDP: NewUDPReactor(listener, logger, stats, proc, rrl),
+		TCP: NewTCPReactor(listener, logger, stats, proc, rrl),
 	}
 }

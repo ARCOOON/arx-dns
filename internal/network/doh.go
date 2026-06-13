@@ -29,11 +29,12 @@ type DoHServer struct {
 	logger *slog.Logger
 	stats  *telemetry.Stats
 	proc   *dnsproc.Processor
+	rrl    *RateLimiter
 	server *http.Server
 }
 
 // NewDoHServer creates a DNS-over-HTTPS listener on addr.
-func NewDoHServer(addr string, tlsCfg *tls.Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor) *DoHServer {
+func NewDoHServer(addr string, tlsCfg *tls.Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor, rrl *RateLimiter) *DoHServer {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -53,6 +54,7 @@ func NewDoHServer(addr string, tlsCfg *tls.Config, logger *slog.Logger, stats *t
 		proc:   proc,
 	}
 	mux.HandleFunc(dohPath, srv.handleDNSQuery)
+	srv.rrl = rrl
 	srv.server = &http.Server{
 		Addr:      addr,
 		Handler:   mux,
@@ -139,6 +141,10 @@ func (s *DoHServer) handleDoHPost(w http.ResponseWriter, r *http.Request) {
 
 func (s *DoHServer) writeDNSResponse(w http.ResponseWriter, r *http.Request, payload []byte) {
 	client := clientIPFromHTTPRequest(r)
+	if s.rrl != nil && !s.rrl.Allow(client) {
+		return
+	}
+
 	response, err := s.proc.ResponseTCP(client, payload)
 	if err != nil {
 		s.logger.Debug("doh parse failed", "error", err, "bytes", len(payload))

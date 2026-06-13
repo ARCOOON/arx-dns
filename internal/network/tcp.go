@@ -32,11 +32,12 @@ type TCPReactor struct {
 	reactor
 	stats *telemetry.Stats
 	proc  *dnsproc.Processor
+	rrl   *RateLimiter
 	conns sync.Map
 }
 
 // NewTCPReactor creates a TCP reactor for the given configuration.
-func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor) *TCPReactor {
+func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor, rrl *RateLimiter) *TCPReactor {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -51,6 +52,7 @@ func NewTCPReactor(cfg Config, logger *slog.Logger, stats *telemetry.Stats, proc
 		},
 		stats: stats,
 		proc:  proc,
+		rrl:   rrl,
 	}
 }
 
@@ -156,6 +158,11 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 		}
 
 		client := ClientIPFromAddr(c.RemoteAddr())
+		if r.rrl != nil && !r.rrl.Allow(client) {
+			state.deadline = time.Now().Add(tcpReadTimeout)
+			continue
+		}
+
 		response, err := r.proc.ResponseTCP(client, payload)
 		if err != nil {
 			r.logger.Debug("tcp parse failed", "error", err, "bytes", len(payload))

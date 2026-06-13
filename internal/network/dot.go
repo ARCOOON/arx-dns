@@ -20,11 +20,12 @@ type DoTServer struct {
 	logger *slog.Logger
 	stats  *telemetry.Stats
 	proc   *dnsproc.Processor
+	rrl    *RateLimiter
 	ln     net.Listener
 }
 
 // NewDoTServer creates a DNS-over-TLS listener on addr.
-func NewDoTServer(addr string, tlsCfg *tls.Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor) *DoTServer {
+func NewDoTServer(addr string, tlsCfg *tls.Config, logger *slog.Logger, stats *telemetry.Stats, proc *dnsproc.Processor, rrl *RateLimiter) *DoTServer {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -41,6 +42,7 @@ func NewDoTServer(addr string, tlsCfg *tls.Config, logger *slog.Logger, stats *t
 		logger: logger,
 		stats:  stats,
 		proc:   proc,
+		rrl:    rrl,
 	}
 }
 
@@ -112,6 +114,11 @@ func (s *DoTServer) serveConn(conn net.Conn) {
 		}
 
 		client := ClientIPFromAddr(conn.RemoteAddr())
+		if s.rrl != nil && !s.rrl.Allow(client) {
+			deadline = time.Now().Add(tcpReadTimeout)
+			continue
+		}
+
 		response, err := s.proc.ResponseTCP(client, payload)
 		if err != nil {
 			s.logger.Debug("dot parse failed", "error", err, "bytes", len(payload))
