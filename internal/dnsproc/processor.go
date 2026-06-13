@@ -178,6 +178,9 @@ func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 		if cached, ok := p.cache.Get(key); ok {
 			if p.stats != nil {
 				p.stats.IncCacheHit()
+				if storage.IsNegativeResponse(cached) {
+					p.stats.IncNegativeCacheHit()
+				}
 			}
 			cached.SetReply(req)
 			cached.RecursionAvailable = true
