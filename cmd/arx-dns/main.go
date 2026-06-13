@@ -80,7 +80,11 @@ func main() {
 	}
 
 	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, logger)
-	reactors := network.NewReactors(cfg, logger, stats, proc)
+
+	rrl := network.NewRateLimiter(cfg.RateLimit, stats)
+	defer rrl.Close()
+
+	reactors := network.NewReactors(cfg, logger, stats, proc, rrl)
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, 5)
@@ -109,6 +113,9 @@ func main() {
 		"block_action", fwAction,
 		"encrypted_dns", cfg.EncryptedDNSEnabled(),
 		"dnssec_validation", cfg.Security.DNSSECValidation,
+		"rate_limit_enabled", cfg.RateLimit.Enabled,
+		"rate_limit_rps", cfg.RateLimit.RequestsPerSecond,
+		"rate_limit_burst", cfg.RateLimit.Burst,
 	)
 	apiServer := api.New(cfg, stats, store, logger)
 	startService("api", apiServer.Run)
@@ -123,11 +130,11 @@ func main() {
 		}
 
 		if strings.TrimSpace(cfg.Listeners.DoT) != "" {
-			dot := network.NewDoTServer(cfg.Listeners.DoT, tlsCfg, logger, stats, proc)
+			dot := network.NewDoTServer(cfg.Listeners.DoT, tlsCfg, logger, stats, proc, rrl)
 			startService("dot", dot.Run)
 		}
 		if strings.TrimSpace(cfg.Listeners.DoH) != "" {
-			doh := network.NewDoHServer(cfg.Listeners.DoH, tlsCfg, logger, stats, proc)
+			doh := network.NewDoHServer(cfg.Listeners.DoH, tlsCfg, logger, stats, proc, rrl)
 			startService("doh", doh.Run)
 		}
 	}
