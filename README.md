@@ -24,7 +24,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                  |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                     |
-| `internal/api/`       | Management HTTP API for health checks, telemetry exposure, zone listing, record CRUD, and zone reload                                                                                              |
+| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                       |
 
 ## Build & Run
 
@@ -127,6 +127,8 @@ doh = ':443'
 [api]
 listen = '127.0.0.1:8080'
 auth_token = 'dev-token-change-me'
+tls_cert = './certs/api.crt'
+tls_key = './certs/api.key'
 ```
 
 | Section / Key                   | Default                                       | Description                                                                                 |
@@ -140,6 +142,8 @@ auth_token = 'dev-token-change-me'
 | `listeners.doh`                 | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                             |
 | `api.listen`                    | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security               |
 | `api.auth_token`                | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                          |
+| `api.tls_cert`                  | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`         |
+| `api.tls_key`                   | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`        |
 | `zones.directory`               | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
 | `recursive.upstreams`           | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
 | `recursive.trusted_subnets`     | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
@@ -303,7 +307,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 
 ### Management API
 
-A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication.
+A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication, optional TLS, structured audit logging for mutations, and strict zone-name validation on record endpoints.
 
 | Endpoint                       | Method | Auth   | Description                                                                   |
 | ------------------------------ | ------ | ------ | ----------------------------------------------------------------------------- |
@@ -325,12 +329,24 @@ Record create/delete payloads use JSON:
 | `name`  | Yes      | Owner name relative to the zone apex (`@`, `www`, or FQDN)                 |
 | `type`  | Yes      | DNS record type (`A`, `AAAA`, `CNAME`, `TXT`, `NS`, `MX`, `PTR`, `SRV`, …) |
 | `ttl`   | No       | TTL in seconds (defaults to `300` on create)                               |
-| `value` | Yes      | RDATA string (e.g. IPv4 for `A`, target hostname for `CNAME`)              |
+| `value` | Yes      | RDATA string; see advanced types below                                     |
 | `view`  | No       | `public` (default) or `internal` for split-DNS view selection              |
 
-Mutations clone the active radix tree, apply the change, atomically swap the tree pointer (lock-free for DNS queries), then rewrite the corresponding `.zone` file on disk via atomic rename.
+Advanced record `value` formats:
 
-Configure the listener and token under `[api]` in `config.toml`. The default bind address is `127.0.0.1:8080` so the API is not exposed on all interfaces. For Docker or remote access, set `api.listen = '0.0.0.0:8080'` and publish the port in Compose.
+| Type  | `value` format                                              | Example                                 |
+| ----- | ----------------------------------------------------------- | --------------------------------------- |
+| `MX`  | `preference hostname`                                       | `10 mail.example.com`                   |
+| `TXT` | Plain text or quoted BIND chunks (max 255 octets per chunk) | `"v=spf1 include:_spf.google.com ~all"` |
+| `SRV` | `priority weight port target`                               | `10 5 5060 sip.example.com`             |
+
+Zone URL parameters are validated to contain only alphanumeric characters, hyphens, and dots. Path traversal sequences (for example `../`) are rejected before any zone file is resolved on disk.
+
+Mutations clone the active radix tree, apply the change, atomically swap the tree pointer (lock-free for DNS queries), then rewrite the corresponding `.zone` file on disk via atomic rename. `MX`, `TXT`, and `SRV` records are serialized in BIND-compatible form (TXT chunks are double-quoted).
+
+Configure the listener and token under `[api]` in `config.toml`. The default bind address is `127.0.0.1:8080` so the API is not exposed on all interfaces. For Docker or remote access, set `api.listen = '0.0.0.0:8080'` and publish the port in Compose. When `api.tls_cert` and `api.tls_key` are set, the management API serves HTTPS via `ListenAndServeTLS`, protecting the Bearer token in transit.
+
+Every `POST` and `DELETE` request emits an immutable structured audit log via `slog` with client IP, targeted zone (when present), action, HTTP status, and success/failure.
 
 ```bash
 curl -s http://127.0.0.1:8080/health
@@ -340,9 +356,14 @@ curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:
 curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
   -d '{"name":"test","type":"A","ttl":3600,"value":"10.0.0.5"}' \
   http://127.0.0.1:8080/api/v1/zones/arx.local/records
+curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
+  -d '{"name":"mail","type":"MX","ttl":3600,"value":"10 mail.arx.local"}' \
+  http://127.0.0.1:8080/api/v1/zones/arx.local/records
 curl -s -X DELETE -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
   -d '{"name":"test","type":"A","value":"10.0.0.5"}' \
   http://127.0.0.1:8080/api/v1/zones/arx.local/records
+# With API TLS enabled:
+curl -s -k -H 'Authorization: Bearer dev-token-change-me' https://127.0.0.1:8080/api/v1/zones
 ```
 
 The API shuts down gracefully with the DNS reactors on `SIGINT` or `SIGTERM`.

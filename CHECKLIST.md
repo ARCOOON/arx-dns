@@ -18,8 +18,8 @@
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
 - [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, and OPT echo in responses (Phase 10). EDNS options and Path MTU Discovery remain open.
 - [ ] **Comprehensive Record Type Support:** Native processing of:
-  - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06).
-  - [~] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16).
+  - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06; `MX`/`TXT` API CRUD and BIND serialization in Phase 18).
+  - [~] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16; `SRV` API CRUD and BIND serialization in Phase 18).
 - [ ] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597).
 - [ ] **Compression Algorithm:** RFC-compliant message compression to minimize packet size.
 
@@ -71,8 +71,10 @@
 - [x] **Access Control Lists (ACLs):** Granular definitions for:
   - [x] Authorized recursive clients (`recursive.trusted_subnets`, REFUSED for untrusted RD queries) (Phase 09).
   - [ ] Authorized zone transfer (AXFR/IXFR) peers.
-  - [ ] Management/API access.
+  - [x] Management/API access.
     - [x] Bearer-token management API on `[api]` listener (Phase 15).
+    - [x] Optional HTTPS (`api.tls_cert` / `api.tls_key`) for Bearer token protection in transit (Phase 18).
+    - [x] Zone URL parameter validation against path traversal (Phase 18).
 - [ ] **DNS Cookies (RFC 7873):** Protection against IP spoofing and cache poisoning attacks.
 
 ## 7. Storage Engine & Pluggable Backends
@@ -88,13 +90,16 @@
 - [~] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
+  - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
+  - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, truncated UDP responses, TCP read timeouts, firewall-blocked queries, and DNSSEC validation pass/fail counters (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
+- [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.
 - [ ] **Prometheus Metrics Exporter:** Native endpoint exposing:
   - [ ] Query statistics (QPS split by UDP/TCP/DoH/DoT/DoQ).
   - [ ] Latency histograms.
   - [ ] Cache hit/miss ratios.
   - [ ] Error code rates (`NXDOMAIN`, `SERVFAIL`, `REFUSED`).
 - [ ] **Structured Logging:** JSON-formatted output to `stdout` or `syslog` with adjustable verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`).
-- [ ] **Audit Trail:** Immutable logging of all administrative actions and API mutations.
+- [x] **Audit Trail:** Immutable logging of all administrative actions and API mutations (`POST`/`DELETE` audit middleware with client IP, zone, action, status) (Phase 18).
