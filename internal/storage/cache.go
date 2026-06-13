@@ -20,6 +20,17 @@ type cacheEntry struct {
 	minTTL   uint32
 }
 
+// IsNegativeResponse reports whether resp is an NXDOMAIN or NODATA answer per RFC 2308.
+func IsNegativeResponse(resp *mdns.Msg) bool {
+	if resp == nil {
+		return false
+	}
+	if resp.Rcode == mdns.RcodeNameError {
+		return true
+	}
+	return resp.Rcode == mdns.RcodeSuccess && len(resp.Answer) == 0
+}
+
 // ResponseCache stores forwarded upstream DNS responses with TTL-aware eviction.
 type ResponseCache struct {
 	cache *ristretto.Cache
@@ -77,13 +88,19 @@ func (c *ResponseCache) Get(key string) (*mdns.Msg, bool) {
 	return resp, true
 }
 
-// Set stores a forwarded upstream response using the minimum section TTL for eviction.
+// Set stores a forwarded upstream response using TTL-aware eviction.
+// Positive answers use the minimum TTL across Answer and Authority records.
+// Negative answers (NXDOMAIN / NODATA) use min(SOA TTL, SOA MINIMUM) from Authority.
 func (c *ResponseCache) Set(key string, resp *mdns.Msg) {
 	if c == nil || c.cache == nil || resp == nil {
 		return
 	}
 
+	negative := IsNegativeResponse(resp)
 	minTTL := minResponseTTL(resp)
+	if negative {
+		minTTL = negativeCacheTTL(resp)
+	}
 	if minTTL == 0 {
 		return
 	}
@@ -100,6 +117,14 @@ func (c *ResponseCache) Set(key string, resp *mdns.Msg) {
 	}
 
 	c.cache.SetWithTTL(key, entry, cost, time.Duration(minTTL)*time.Second)
+}
+
+// Wait blocks until pending cache writes are applied.
+func (c *ResponseCache) Wait() {
+	if c == nil || c.cache == nil {
+		return
+	}
+	c.cache.Wait()
 }
 
 func cloneForwardResponse(resp *mdns.Msg) *mdns.Msg {
@@ -130,6 +155,21 @@ func minResponseTTL(resp *mdns.Msg) uint32 {
 		minTTL = nsMin
 	}
 	return minTTL
+}
+
+func negativeCacheTTL(resp *mdns.Msg) uint32 {
+	for _, rr := range resp.Ns {
+		soa, ok := rr.(*mdns.SOA)
+		if !ok {
+			continue
+		}
+		ttl := soa.Hdr.Ttl
+		if soa.Minttl < ttl {
+			ttl = soa.Minttl
+		}
+		return ttl
+	}
+	return 0
 }
 
 func sectionMinTTL(rrs []mdns.RR) uint32 {
