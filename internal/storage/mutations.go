@@ -265,6 +265,14 @@ func formatZoneLine(rr mdns.RR, origin string) (string, error) {
 		), nil
 	}
 
+	if txt, ok := rr.(*mdns.TXT); ok {
+		rdata = formatTXTRdata(txt.Txt)
+		if rdata == "" {
+			return "", fmt.Errorf("empty rdata for %s TXT", owner)
+		}
+		return fmt.Sprintf("%s %d IN TXT %s", owner, hdr.Ttl, rdata), nil
+	}
+
 	return fmt.Sprintf("%s %d IN %s %s", owner, hdr.Ttl, typ, rdata), nil
 }
 
