@@ -22,6 +22,7 @@ type Stats struct {
 	upstreamFailures        atomic.Uint64
 	cacheHits               atomic.Uint64
 	cacheMisses             atomic.Uint64
+	negativeCacheHits       atomic.Uint64
 	aclRejected             atomic.Uint64
 	truncatedResponses      atomic.Uint64
 	tcpTimeouts             atomic.Uint64
@@ -52,6 +53,7 @@ type Snapshot struct {
 	UpstreamFailures        uint64 `json:"upstream_failures"`
 	CacheHits               uint64 `json:"cache_hits"`
 	CacheMisses             uint64 `json:"cache_misses"`
+	NegativeCacheHits       uint64 `json:"negative_cache_hits"`
 	ACLRejected             uint64 `json:"acl_rejected"`
 	TruncatedResponses      uint64 `json:"truncated_responses"`
 	TCPTimeouts             uint64 `json:"tcp_timeouts"`
@@ -78,6 +80,7 @@ func (s *Stats) Snapshot() Snapshot {
 		UpstreamFailures:        s.upstreamFailures.Load(),
 		CacheHits:               s.cacheHits.Load(),
 		CacheMisses:             s.cacheMisses.Load(),
+		NegativeCacheHits:       s.negativeCacheHits.Load(),
 		ACLRejected:             s.aclRejected.Load(),
 		TruncatedResponses:      s.truncatedResponses.Load(),
 		TCPTimeouts:             s.tcpTimeouts.Load(),
@@ -156,6 +159,10 @@ func (s *Stats) IncCacheHit() {
 
 func (s *Stats) IncCacheMiss() {
 	s.cacheMisses.Add(1)
+}
+
+func (s *Stats) IncNegativeCacheHit() {
+	s.negativeCacheHits.Add(1)
 }
 
 func (s *Stats) IncACLRejected() {
