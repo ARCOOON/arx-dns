@@ -53,6 +53,8 @@ type ListenersConfig struct {
 type APIConfig struct {
 	Listen    string `toml:"listen"`
 	AuthToken string `toml:"auth_token"`
+	TLSCert   string `toml:"tls_cert"`
+	TLSKey    string `toml:"tls_key"`
 }
 
 // ZonesConfig controls authoritative zone file storage.
@@ -261,7 +263,36 @@ func (c Config) validateAPI() error {
 	if strings.TrimSpace(c.API.AuthToken) == "" {
 		return errors.New("api.auth_token must not be empty")
 	}
+	return c.validateAPITLS()
+}
+
+func (c Config) validateAPITLS() error {
+	cert := strings.TrimSpace(c.API.TLSCert)
+	key := strings.TrimSpace(c.API.TLSKey)
+
+	if cert == "" && key == "" {
+		return nil
+	}
+	if cert == "" {
+		return errors.New("api.tls_cert is required when api.tls_key is set")
+	}
+	if key == "" {
+		return errors.New("api.tls_key is required when api.tls_cert is set")
+	}
+
+	if _, err := os.Stat(cert); err != nil {
+		return fmt.Errorf("api.tls_cert %q: %w", cert, err)
+	}
+	if _, err := os.Stat(key); err != nil {
+		return fmt.Errorf("api.tls_key %q: %w", key, err)
+	}
+
 	return nil
+}
+
+// APITLSEnabled reports whether TLS certificate paths are configured for the management API.
+func (c Config) APITLSEnabled() bool {
+	return strings.TrimSpace(c.API.TLSCert) != "" && strings.TrimSpace(c.API.TLSKey) != ""
 }
 
 func (c Config) validateTLS() error {
