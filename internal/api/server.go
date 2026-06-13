@@ -47,7 +47,10 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, logge
 
 	auth := bearerAuth(cfg.API.AuthToken)
 	mux.Handle("GET /api/v1/stats", auth(http.HandlerFunc(s.handleStats)))
+	mux.Handle("GET /api/v1/zones", auth(http.HandlerFunc(s.handleListZones)))
 	mux.Handle("POST /api/v1/zones/reload", auth(http.HandlerFunc(s.handleZonesReload)))
+	mux.Handle("POST /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleCreateRecord)))
+	mux.Handle("DELETE /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleDeleteRecord)))
 
 	s.server = &http.Server{
 		Addr:    cfg.API.Listen,
