@@ -29,6 +29,14 @@ type Config struct {
 	RateLimit RateLimitConfig `toml:"rate_limit"`
 	ECS       ECSConfig       `toml:"ecs"`
 	Update    UpdateConfig    `toml:"update"`
+	XFR       XFRConfig       `toml:"xfr"`
+}
+
+// XFRConfig controls zone transfer (AXFR/IXFR) ACLs and NOTIFY slave targets.
+type XFRConfig struct {
+	Enabled        bool     `toml:"enabled"`
+	AllowedSubnets []string `toml:"allowed_subnets"`
+	NotifySlaves   []string `toml:"notify_slaves"`
 }
 
 // UpdateConfig controls RFC 2136 dynamic DNS updates secured with TSIG.
@@ -323,6 +331,9 @@ func (c Config) Validate() error {
 	if err := c.validateUpdate(); err != nil {
 		return err
 	}
+	if err := c.validateXFR(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -615,6 +626,62 @@ func (c Config) NormalizedUpstreams() ([]string, error) {
 	}
 
 	return out, nil
+}
+
+func (c Config) validateXFR() error {
+	if !c.XFR.Enabled {
+		return nil
+	}
+	if _, err := c.XFRAllowedSubnetsCSV(); err != nil {
+		return err
+	}
+	if _, err := c.NormalizedNotifySlaves(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// XFRAllowedSubnetsCSV joins zone-transfer ACL prefixes for parsing.
+func (c Config) XFRAllowedSubnetsCSV() (string, error) {
+	parts := make([]string, 0, len(c.XFR.AllowedSubnets))
+	for _, subnet := range c.XFR.AllowedSubnets {
+		subnet = strings.TrimSpace(subnet)
+		if subnet == "" {
+			continue
+		}
+		parts = append(parts, subnet)
+	}
+	return strings.Join(parts, ","), nil
+}
+
+// NormalizedNotifySlaves returns slave addresses in host:port form (default port 53).
+func (c Config) NormalizedNotifySlaves() ([]string, error) {
+	out := make([]string, 0, len(c.XFR.NotifySlaves))
+	for _, raw := range c.XFR.NotifySlaves {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		addr, err := normalizeNotifySlave(raw)
+		if err != nil {
+			return nil, fmt.Errorf("xfr.notify_slaves %q: %w", raw, err)
+		}
+		out = append(out, addr)
+	}
+	return out, nil
+}
+
+func normalizeNotifySlave(raw string) (string, error) {
+	if host, port, err := net.SplitHostPort(raw); err == nil {
+		if host == "" || port == "" {
+			return "", fmt.Errorf("invalid address")
+		}
+		return net.JoinHostPort(host, port), nil
+	}
+	if strings.Contains(raw, ":") {
+		return net.JoinHostPort(raw, "53"), nil
+	}
+	return net.JoinHostPort(raw, "53"), nil
 }
 
 func validateBlockAction(raw string) error {
