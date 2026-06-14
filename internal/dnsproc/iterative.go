@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"net"
 	"net/netip"
+	"strings"
 	"time"
 
 	mdns "github.com/miekg/dns"
@@ -26,11 +27,12 @@ var ErrIterativeDepthExceeded = errors.New("iterative resolution depth exceeded"
 
 // IterativeResolver resolves queries by walking delegations from root hints with RD=0.
 type IterativeResolver struct {
-	rootHints        []string
-	client           *mdns.Client
-	stats            *telemetry.Stats
-	dnssecValidation bool
-	maxDepth         int
+	rootHints         []string
+	client            *mdns.Client
+	stats             *telemetry.Stats
+	dnssecValidation  bool
+	qnameMinimization bool
+	maxDepth          int
 }
 
 // NewIterativeFromConfig builds an iterative resolver from application configuration.
@@ -41,6 +43,7 @@ func NewIterativeFromConfig(cfg config.Config, stats *telemetry.Stats) (*Iterati
 	}
 	r := NewIterativeResolver(hints, stats)
 	r.dnssecValidation = cfg.Security.DNSSECValidation
+	r.qnameMinimization = cfg.Resolver.QNameMinimization
 	return r, nil
 }
 
@@ -79,7 +82,12 @@ func (r *IterativeResolver) Exchange(req *mdns.Msg, _ netip.Addr) (*mdns.Msg, er
 		r.stats.IncForwardedQuery()
 	}
 
-	resp, err := r.resolve(q.Name, q.Qtype, q.Qclass, r.pickRoot(), 0)
+	minLabels := 0
+	if r.qnameMinimization {
+		minLabels = 1
+	}
+
+	resp, err := r.resolve(q.Name, q.Qtype, q.Qclass, r.pickRoot(), 0, minLabels)
 	if err != nil {
 		if r.stats != nil {
 			r.stats.IncUpstreamFailure()
@@ -89,7 +97,7 @@ func (r *IterativeResolver) Exchange(req *mdns.Msg, _ netip.Addr) (*mdns.Msg, er
 	return resp, nil
 }
 
-func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers []string, depth int) (*mdns.Msg, error) {
+func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers []string, depth int, minLabels int) (*mdns.Msg, error) {
 	if depth >= r.maxDepth {
 		return nil, ErrIterativeDepthExceeded
 	}
@@ -99,8 +107,9 @@ func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers [
 
 	current := mdns.Fqdn(name)
 	for cnameSteps := 0; cnameSteps < maxCNAMEChainDepth; cnameSteps++ {
-		req := r.buildQuery(current, qtype, qclass)
-		resp, err := r.queryServers(req, servers)
+		queryName, queryType, minimized := r.delegationQueryParams(current, qtype, minLabels)
+		req := r.buildQuery(queryName, queryType, qclass)
+		resp, err := r.queryDelegation(req, current, qtype, qclass, servers, minimized)
 		if err != nil {
 			return nil, err
 		}
@@ -116,6 +125,11 @@ func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers [
 		if target, ok := r.cnameTarget(resp, current); ok {
 			current = mdns.Fqdn(target)
 			servers = r.pickRoot()
+			if r.qnameMinimization {
+				minLabels = 1
+			} else {
+				minLabels = 0
+			}
 			continue
 		}
 
@@ -131,10 +145,67 @@ func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers [
 				return nil, err
 			}
 		}
-		return r.resolve(current, qtype, qclass, next, depth+1)
+
+		nextMinLabels := minLabels
+		if minimized {
+			nextMinLabels = minLabels + 1
+		}
+		return r.resolve(current, qtype, qclass, next, depth+1, nextMinLabels)
 	}
 
 	return nil, ErrIterativeDepthExceeded
+}
+
+// delegationQueryParams returns the QNAME and QTYPE for a delegation-walk query.
+// When QNAME minimization is active and minLabels reveals fewer labels than the
+// target name, the query uses QTYPE NS per RFC 7816.
+func (r *IterativeResolver) delegationQueryParams(target string, qtype uint16, minLabels int) (string, uint16, bool) {
+	target = mdns.Fqdn(target)
+	if !r.qnameMinimization || minLabels <= 0 {
+		return target, qtype, false
+	}
+
+	total := qnameLabelCount(target)
+	if minLabels >= total {
+		return target, qtype, false
+	}
+
+	return minimizedQName(target, minLabels), mdns.TypeNS, true
+}
+
+func qnameLabelCount(fqdn string) int {
+	return len(mdns.SplitDomainName(mdns.Fqdn(fqdn)))
+}
+
+func minimizedQName(fqdn string, labelCount int) string {
+	labels := mdns.SplitDomainName(mdns.Fqdn(fqdn))
+	if labelCount <= 0 || labelCount >= len(labels) {
+		return mdns.Fqdn(fqdn)
+	}
+	start := len(labels) - labelCount
+	return mdns.Fqdn(strings.Join(labels[start:], "."))
+}
+
+func (r *IterativeResolver) queryDelegation(req *mdns.Msg, fullName string, qtype, qclass uint16, servers []string, minimized bool) (*mdns.Msg, error) {
+	resp, err := r.queryServers(req, servers)
+	if !minimized {
+		return resp, err
+	}
+	if err != nil || needsQNameMinFallback(resp) {
+		if r.stats != nil {
+			r.stats.IncQNameMinFallback()
+		}
+		fullReq := r.buildQuery(mdns.Fqdn(fullName), qtype, qclass)
+		return r.queryServers(fullReq, servers)
+	}
+	return resp, nil
+}
+
+func needsQNameMinFallback(resp *mdns.Msg) bool {
+	if resp == nil {
+		return false
+	}
+	return resp.Rcode == mdns.RcodeServerFailure || resp.Rcode == mdns.RcodeRefused
 }
 
 func (r *IterativeResolver) buildQuery(name string, qtype, qclass uint16) *mdns.Msg {
@@ -243,13 +314,25 @@ func (r *IterativeResolver) referralNS(resp *mdns.Msg) []string {
 	if resp == nil {
 		return nil
 	}
-	out := make([]string, 0, len(resp.Ns))
-	for _, rr := range resp.Ns {
+	out := make([]string, 0, len(resp.Ns)+len(resp.Answer))
+	seen := make(map[string]struct{})
+	appendNS := func(rr mdns.RR) {
 		ns, ok := rr.(*mdns.NS)
 		if !ok {
-			continue
+			return
 		}
+		name := mdns.CanonicalName(ns.Ns)
+		if _, dup := seen[name]; dup {
+			return
+		}
+		seen[name] = struct{}{}
 		out = append(out, ns.Ns)
+	}
+	for _, rr := range resp.Ns {
+		appendNS(rr)
+	}
+	for _, rr := range resp.Answer {
+		appendNS(rr)
 	}
 	return out
 }
@@ -320,14 +403,19 @@ func (r *IterativeResolver) resolveGlue(nsHosts []string, depth int) ([]string, 
 }
 
 func (r *IterativeResolver) resolveNameserverHost(host string, depth int) ([]string, error) {
-	resp, err := r.resolve(host, mdns.TypeA, mdns.ClassINET, r.pickRoot(), depth)
+	minLabels := 0
+	if r.qnameMinimization {
+		minLabels = 1
+	}
+
+	resp, err := r.resolve(host, mdns.TypeA, mdns.ClassINET, r.pickRoot(), depth, minLabels)
 	if err == nil && resp != nil && resp.Rcode == mdns.RcodeSuccess {
 		if addrs := r.extractAddressTargets(resp); len(addrs) > 0 {
 			return addrs, nil
 		}
 	}
 
-	resp, err = r.resolve(host, mdns.TypeAAAA, mdns.ClassINET, r.pickRoot(), depth)
+	resp, err = r.resolve(host, mdns.TypeAAAA, mdns.ClassINET, r.pickRoot(), depth, minLabels)
 	if err != nil {
 		return nil, err
 	}
