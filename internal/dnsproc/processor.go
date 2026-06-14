@@ -418,11 +418,29 @@ func (p *Processor) badCookieResponse(req *mdns.Msg, client netip.Addr, cookieCt
 	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
+// stripExtraOPT removes all OPT pseudo-records from the Additional section.
+// Forwarded and cached responses may already carry an upstream OPT; SetEdns0 appends
+// rather than replaces, so existing records must be stripped first (RFC 6891).
+func stripExtraOPT(msg *mdns.Msg) {
+	if len(msg.Extra) == 0 {
+		return
+	}
+	filtered := msg.Extra[:0]
+	for _, rr := range msg.Extra {
+		if _, isOPT := rr.(*mdns.OPT); isOPT {
+			continue
+		}
+		filtered = append(filtered, rr)
+	}
+	msg.Extra = filtered
+}
+
 // packResponse appends an EDNS0 OPT record when the request carried one, truncates UDP
 // responses to the negotiated payload size (512 bytes when EDNS0 is absent), sets TC
 // when records are omitted, and enables RFC 1035 name compression before serialization.
 func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
 	if opt := req.IsEdns0(); opt != nil {
+		stripExtraOPT(resp)
 		resp.SetEdns0(opt.UDPSize(), opt.Do())
 		p.attachResponseCookie(resp, client, cookieCtx)
 	}

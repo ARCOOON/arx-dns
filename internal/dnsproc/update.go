@@ -267,6 +267,7 @@ func (p *Processor) updateResponse(req *mdns.Msg, rcode int, limitUDP bool, clie
 		secret := p.tsigSecrets[tsigCtx.keyName]
 		if secret != "" {
 			if opt := req.IsEdns0(); opt != nil {
+				stripExtraOPT(resp)
 				resp.SetEdns0(opt.UDPSize(), opt.Do())
 				p.attachResponseCookie(resp, client, cookieCtx)
 			}
