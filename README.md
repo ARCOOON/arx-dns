@@ -15,16 +15,16 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                  | Purpose                                                                                                                                                                                            |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                               |
-| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                             |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                    |
-| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
-| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                  |
-| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                |
-| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                     |
-| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                       |
+| Path                  | Purpose                                                                                                                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                                                        |
+| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                      |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                             |
+| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
+| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                           |
+| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                         |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                              |
+| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                                                |
 
 ## Build & Run
 
@@ -189,7 +189,35 @@ The default `zones/arx.local.zone` ships a small demo zone for immediate testing
 | `router.arx.local` | AAAA  | `fd00::1`          |
 | `www.arx.local`    | CNAME | `router.arx.local` |
 
-Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown and recursion is not requested, or `NOERROR` with an empty answer when the name exists but the requested type is absent.
+Valid incoming DNS queries receive an authoritative answer when the name exists, `NXDOMAIN` when the name is unknown and recursion is not requested, or `NOERROR` with an empty answer when the name exists but the requested type is absent. `ANY` (QTYPE 255) queries are answered per RFC 8482 with a single minimal record (enclosing zone SOA when available, otherwise a synthesized `HINFO`) and the **TC** bit set to discourage amplification.
+
+### ANY query mitigation (RFC 8482)
+
+Authoritative servers must not return every RRset for `ANY` queries. arx-dns returns at most one record:
+
+| Condition                          | Answer                                                                  |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| Name exists in zone, SOA available | Copy of the enclosing zone apex `SOA` record                            |
+| Name exists, no enclosing SOA      | Synthesized `HINFO` (`CPU=RFC8482`, `OS` = RFC 8482 reference URL)      |
+| Name absent from all views         | `NXDOMAIN` (or upstream forward when `RD` is set and client is trusted) |
+
+The **TC (Truncated)** bit is always set on successful `ANY` responses.
+
+### RFC 3597 unknown resource records
+
+Zone files and the management API accept unknown RR types using BIND generic syntax:
+
+```text
+custom  300  IN  TYPE65280  \# 2 aabb
+```
+
+API create example:
+
+```json
+{"name":"custom","type":"TYPE65280","ttl":300,"value":"\\# 2 aabb"}
+```
+
+Unknown types are stored opaquely in the radix tree and served back to clients with identical wire data. Zone rewrites preserve `TYPE<id>` and `\#` formatting.
 
 ### EDNS0 (RFC 6891)
 
@@ -441,15 +469,22 @@ Record create/delete payloads use JSON:
 
 Advanced record `value` formats:
 
-| Type  | `value` format                                              | Example                                 |
-| ----- | ----------------------------------------------------------- | --------------------------------------- |
-| `MX`  | `preference hostname`                                       | `10 mail.example.com`                   |
-| `TXT` | Plain text or quoted BIND chunks (max 255 octets per chunk) | `"v=spf1 include:_spf.google.com ~all"` |
-| `SRV` | `priority weight port target`                               | `10 5 5060 sip.example.com`             |
+| Type       | `value` format                                              | Example                                                  |
+| ---------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| `MX`       | `preference hostname`                                       | `10 mail.example.com`                                    |
+| `TXT`      | Plain text or quoted BIND chunks (max 255 octets per chunk) | `"v=spf1 include:_spf.google.com ~all"`                  |
+| `SRV`      | `priority weight port target`                               | `10 5 5060 sip.example.com`                              |
+| `NS`       | Nameserver hostname                                         | `ns1.example.com`                                        |
+| `SOA`      | `ns mbox serial refresh retry expire minimum`               | `ns1.example.com admin.example.com 1 3600 600 86400 300` |
+| `PTR`      | Target hostname                                             | `host.example.com`                                       |
+| `CAA`      | BIND CAA RDATA                                              | `0 issue "letsencrypt.org"`                              |
+| `SVCB`     | BIND SVCB RDATA                                             | `1 . alpn=h2`                                            |
+| `HTTPS`    | BIND HTTPS RDATA                                            | `1 . alpn=h2`                                            |
+| `TYPE<id>` | RFC 3597 generic RDATA                                      | `\# 4 aabbccdd`                                          |
 
 Zone URL parameters are validated to contain only alphanumeric characters, hyphens, and dots. Path traversal sequences (for example `../`) are rejected before any zone file is resolved on disk.
 
-Mutations clone the active radix tree, apply the change, atomically swap the tree pointer (lock-free for DNS queries), then rewrite the corresponding `.zone` file on disk via atomic rename. `MX`, `TXT`, and `SRV` records are serialized in BIND-compatible form (TXT chunks are double-quoted).
+Mutations clone the active radix tree, apply the change, atomically swap the tree pointer (lock-free for DNS queries), then rewrite the corresponding `.zone` file on disk via atomic rename. `MX`, `TXT`, `SRV`, `NS`, `SOA`, `PTR`, `CAA`, `SVCB`, `HTTPS`, and RFC 3597 `TYPE<id>` records are serialized in BIND-compatible form (TXT/CAA chunks are double-quoted when required; unknown types use `\#` hex encoding).
 
 Configure the listener and token under `[api]` in `config.toml`. The default bind address is `127.0.0.1:8080` so the API is not exposed on all interfaces. For Docker or remote access, set `api.listen = '0.0.0.0:8080'` and publish the port in Compose. When `api.tls_cert` and `api.tls_key` are set, the management API serves HTTPS via `ListenAndServeTLS`, protecting the Bearer token in transit.
 

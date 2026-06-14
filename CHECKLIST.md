@@ -17,10 +17,11 @@
 
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
 - [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, and OPT echo in responses (Phase 10). EDNS options beyond DNS Cookies and Path MTU Discovery remain open.
-- [ ] **Comprehensive Record Type Support:** Native processing of:
-  - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06; `MX`/`TXT` API CRUD and BIND serialization in Phase 18).
-  - [~] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16; `SRV` API CRUD and BIND serialization in Phase 18).
-- [ ] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597).
+- [x] **Comprehensive Record Type Support:** Native processing of:
+  - [x] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06; `MX`/`TXT` API CRUD and BIND serialization in Phase 18; `NS`/`SOA`/`PTR` API validation and BIND serialization in Phase 24).
+  - [x] Enterprise/Sec: `SRV`, `CAA`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16; `SRV` API CRUD and BIND serialization in Phase 18; `CAA`/`SVCB`/`HTTPS` API validation and BIND serialization in Phase 24). `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3` remain open for authoritative signing.
+- [x] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597) via `TYPE<id>` and `\# <length> <hex>` BIND syntax (Phase 24).
+- [x] **ANY Query Mitigation (RFC 8482):** QTYPE 255 returns a minimal authoritative answer (zone SOA or synthesized HINFO) with TC set; full RRset enumeration is not performed (Phase 24).
 - [ ] **Compression Algorithm:** RFC-compliant message compression to minimize packet size.
 
 ## 3. Operational Modes (Hybrid Architecture)
