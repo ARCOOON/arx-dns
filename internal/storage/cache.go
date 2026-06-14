@@ -49,11 +49,21 @@ func NewResponseCache() (*ResponseCache, error) {
 	return &ResponseCache{cache: c}, nil
 }
 
-// QuestionKey returns a deterministic cache key from a DNS question.
+// QuestionKey returns a deterministic base cache key from a DNS question.
 func QuestionKey(q mdns.Question) string {
 	return NormalizeName(q.Name) + "|" +
 		strconv.FormatUint(uint64(q.Qtype), 10) + "|" +
 		strconv.FormatUint(uint64(q.Qclass), 10)
+}
+
+// CacheKey returns a deterministic cache key including ECS scope when present
+// in the query or synthesized from ecs when ECS forwarding is enabled.
+func CacheKey(q mdns.Question, req *mdns.Msg, ecs ECSContext) string {
+	key := QuestionKey(q)
+	if suffix := ECSCacheSuffix(req, ecs); suffix != "" {
+		key += "|ecs:" + suffix
+	}
+	return key
 }
 
 // Get returns a cached upstream response with TTLs adjusted for elapsed time.
