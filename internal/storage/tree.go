@@ -110,3 +110,64 @@ func removeMatchingRR(tree *radix.Tree, name string, qtype uint16, value string)
 	}
 	return true
 }
+
+// removeRRset deletes all resource records of qtype at name. When qtype is TypeANY,
+// every RRset at name is removed.
+func removeRRset(tree *radix.Tree, name string, qtype uint16) bool {
+	name = NormalizeName(name)
+	raw, ok := tree.Get(name)
+	if !ok {
+		return false
+	}
+
+	byType := raw.(map[uint16][]mdns.RR)
+	if qtype == mdns.TypeANY {
+		tree.Delete(name)
+		return true
+	}
+
+	if _, ok := byType[qtype]; !ok {
+		return false
+	}
+	delete(byType, qtype)
+	if len(byType) == 0 {
+		tree.Delete(name)
+	} else {
+		tree.Insert(name, byType)
+	}
+	return true
+}
+
+// removeAllAtName deletes every resource record stored at name.
+func removeAllAtName(tree *radix.Tree, name string) bool {
+	name = NormalizeName(name)
+	if _, ok := tree.Get(name); !ok {
+		return false
+	}
+	tree.Delete(name)
+	return true
+}
+
+// rrExists reports whether an exact RR (name, type, rdata) is present in tree.
+func rrExists(tree *radix.Tree, rr mdns.RR) bool {
+	if rr == nil || tree == nil {
+		return false
+	}
+	hdr := rr.Header()
+	rrs, status := lookupInTree(tree, hdr.Name, hdr.Rrtype)
+	if status != LookupFound {
+		return false
+	}
+	for _, candidate := range rrs {
+		if mdns.IsDuplicate(candidate, rr) {
+			return true
+		}
+	}
+	return false
+}
+
+// rrsetExists reports whether at least one RR of qtype exists at name.
+func rrsetExists(tree *radix.Tree, name string, qtype uint16) bool {
+	_, status := lookupInTree(tree, name, qtype)
+	return status == LookupFound
+}

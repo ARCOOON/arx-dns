@@ -297,3 +297,41 @@ func relativeOwnerName(name, origin string) string {
 	}
 	return name
 }
+
+// ApplyDynamicUpdate applies a callback against a cloned zone tree, atomically swaps the
+// view, and persists the zone file. The callback must return storage-layer update errors
+// (e.g. ErrUpdateNXRRSET) to signal RFC 2136 prerequisite or update failures.
+func (m *Memory) ApplyDynamicUpdate(zonesDir, origin string, view ZoneView, apply func(tree *radix.Tree) error) error {
+	if m == nil {
+		return fmt.Errorf("memory store is nil")
+	}
+
+	origin = NormalizeName(origin)
+
+	m.mutateMu.Lock()
+	defer m.mutateMu.Unlock()
+
+	if !m.zoneExistsLocked(origin, view) {
+		return ErrZoneNotFound
+	}
+
+	tree := cloneTree(m.treeForView(view))
+	if err := apply(tree); err != nil {
+		return err
+	}
+
+	if view == ViewInternal {
+		m.SwapInternalTree(tree)
+	} else {
+		m.SwapPublicTree(tree)
+	}
+
+	path, err := m.zoneFilePath(zonesDir, origin, view)
+	if err != nil {
+		return err
+	}
+	if err := WriteZoneFile(path, origin, tree); err != nil {
+		return fmt.Errorf("persist zone file: %w", err)
+	}
+	return nil
+}
