@@ -20,6 +20,7 @@ const (
 	tcpKeepInterval = 30 * time.Second
 	tcpKeepCount    = 3
 	tcpReadTimeout  = 3 * time.Second
+	tcpXferTimeout  = 5 * time.Minute
 	tcpTimeoutTick  = 500 * time.Millisecond
 )
 
@@ -163,26 +164,42 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 			continue
 		}
 
-		response, err := r.proc.ResponseTCP(client, payload)
-		if err != nil {
-			r.logger.Debug("tcp parse failed", "error", err, "bytes", len(payload))
-			r.stats.IncParseError()
-			state.deadline = time.Now().Add(tcpReadTimeout)
-			continue
+		isXfer := dnsproc.IsZoneTransferQuery(payload)
+		if isXfer {
+			state.deadline = time.Now().Add(tcpXferTimeout)
 		}
 
-		out := make([]byte, tcpLengthPrefix+len(response))
-		binary.BigEndian.PutUint16(out[:tcpLengthPrefix], uint16(len(response)))
-		copy(out[tcpLengthPrefix:], response)
-
-		if _, err := c.Write(out); err != nil {
-			r.logger.Warn("tcp write failed", "error", err)
-			r.stats.IncWriteError()
+		var lastResponse []byte
+		err = r.proc.HandleTCP(client, payload, func(data []byte) error {
+			lastResponse = data
+			out := make([]byte, tcpLengthPrefix+len(data))
+			binary.BigEndian.PutUint16(out[:tcpLengthPrefix], uint16(len(data)))
+			copy(out[tcpLengthPrefix:], data)
+			if _, writeErr := c.Write(out); writeErr != nil {
+				r.logger.Warn("tcp write failed", "error", writeErr)
+				r.stats.IncWriteError()
+				return writeErr
+			}
+			if isXfer {
+				state.deadline = time.Now().Add(tcpXferTimeout)
+			}
+			return nil
+		})
+		if err != nil {
+			r.logger.Debug("tcp query failed", "error", err, "bytes", len(payload))
+			if !isXfer {
+				r.stats.IncParseError()
+			}
 			return gnet.Close
 		}
 
 		r.stats.IncTCPQuery()
-		recordAnswer(r.stats, response)
+		if !isXfer && lastResponse != nil {
+			recordAnswer(r.stats, lastResponse)
+		}
 		state.deadline = time.Now().Add(tcpReadTimeout)
+		if isXfer {
+			state.deadline = time.Now().Add(tcpXferTimeout)
+		}
 	}
 }

@@ -119,31 +119,50 @@ func (s *DoTServer) serveConn(conn net.Conn) {
 			continue
 		}
 
-		response, err := s.proc.ResponseTCP(client, payload)
+		isXfer := dnsproc.IsZoneTransferQuery(payload)
+		writeTimeout := tcpReadTimeout
+		if isXfer {
+			writeTimeout = tcpXferTimeout
+			deadline = time.Now().Add(tcpXferTimeout)
+		}
+
+		var lastResponse []byte
+		err := s.proc.HandleTCP(client, payload, func(data []byte) error {
+			lastResponse = data
+			out := make([]byte, tcpLengthPrefix+len(data))
+			binary.BigEndian.PutUint16(out[:tcpLengthPrefix], uint16(len(data)))
+			copy(out[tcpLengthPrefix:], data)
+
+			if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				s.stats.IncWriteError()
+				return err
+			}
+			if _, err := conn.Write(out); err != nil {
+				s.logger.Warn("dot write failed", "error", err)
+				s.stats.IncWriteError()
+				return err
+			}
+			if isXfer {
+				deadline = time.Now().Add(tcpXferTimeout)
+			}
+			return nil
+		})
 		if err != nil {
-			s.logger.Debug("dot parse failed", "error", err, "bytes", len(payload))
-			s.stats.IncParseError()
-			deadline = time.Now().Add(tcpReadTimeout)
-			continue
-		}
-
-		out := make([]byte, tcpLengthPrefix+len(response))
-		binary.BigEndian.PutUint16(out[:tcpLengthPrefix], uint16(len(response)))
-		copy(out[tcpLengthPrefix:], response)
-
-		if err := conn.SetWriteDeadline(time.Now().Add(tcpReadTimeout)); err != nil {
-			s.stats.IncWriteError()
-			return
-		}
-		if _, err := conn.Write(out); err != nil {
-			s.logger.Warn("dot write failed", "error", err)
-			s.stats.IncWriteError()
+			s.logger.Debug("dot query failed", "error", err, "bytes", len(payload))
+			if !isXfer {
+				s.stats.IncParseError()
+			}
 			return
 		}
 
 		s.stats.IncDoTQuery()
-		recordAnswer(s.stats, response)
+		if !isXfer && lastResponse != nil {
+			recordAnswer(s.stats, lastResponse)
+		}
 		deadline = time.Now().Add(tcpReadTimeout)
+		if isXfer {
+			deadline = time.Now().Add(tcpXferTimeout)
+		}
 	}
 }
 

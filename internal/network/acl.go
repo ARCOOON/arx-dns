@@ -38,6 +38,15 @@ func ParseACL(csv string) (*ACL, error) {
 	return &ACL{prefixes: prefixes}, nil
 }
 
+// ACLFromXFRConfig builds the zone-transfer ACL from application configuration.
+func ACLFromXFRConfig(cfg config.Config) (*ACL, error) {
+	csv, err := cfg.XFRAllowedSubnetsCSV()
+	if err != nil {
+		return nil, err
+	}
+	return ParseACL(csv)
+}
+
 // ACLFromConfig builds the recursive-query ACL from application configuration.
 func ACLFromConfig(cfg config.Config) (*ACL, error) {
 	csv, err := cfg.TrustedSubnetsCSV()
