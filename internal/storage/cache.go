@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -33,11 +34,12 @@ func IsNegativeResponse(resp *mdns.Msg) bool {
 
 // ResponseCache stores forwarded upstream DNS responses with TTL-aware eviction.
 type ResponseCache struct {
-	cache *ristretto.Cache
+	cache  *ristretto.Cache
+	logger *slog.Logger
 }
 
 // NewResponseCache creates a Ristretto cache tuned for high read throughput.
-func NewResponseCache() (*ResponseCache, error) {
+func NewResponseCache(logger *slog.Logger) (*ResponseCache, error) {
 	c, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: defaultCacheCounters,
 		MaxCost:     defaultCacheMaxCost,
@@ -46,7 +48,7 @@ func NewResponseCache() (*ResponseCache, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ResponseCache{cache: c}, nil
+	return &ResponseCache{cache: c, logger: logger}, nil
 }
 
 // QuestionKey returns a deterministic base cache key from a DNS question.
@@ -75,24 +77,44 @@ func (c *ResponseCache) Get(key string) (*mdns.Msg, bool) {
 
 	raw, ok := c.cache.Get(key)
 	if !ok {
+		if c.logger != nil {
+			c.logger.Debug("cache miss", "key", key)
+		}
 		return nil, false
 	}
 
 	entry, ok := raw.(*cacheEntry)
 	if !ok || entry == nil || entry.msg == nil {
+		if c.logger != nil {
+			c.logger.Debug("cache miss", "key", key, "reason", "invalid_entry")
+		}
 		return nil, false
 	}
 
 	elapsed := uint32(time.Since(entry.storedAt).Seconds())
 	if elapsed >= entry.minTTL {
 		c.cache.Del(key)
+		if c.logger != nil {
+			c.logger.Debug("cache miss", "key", key, "reason", "expired")
+		}
 		return nil, false
 	}
 
 	resp := entry.msg.Copy()
 	if !adjustRecordTTLs(resp, elapsed) {
 		c.cache.Del(key)
+		if c.logger != nil {
+			c.logger.Debug("cache miss", "key", key, "reason", "ttl_exhausted")
+		}
 		return nil, false
+	}
+
+	if c.logger != nil {
+		c.logger.Debug("cache hit",
+			"key", key,
+			"remaining_ttl", entry.minTTL-elapsed,
+			"negative", IsNegativeResponse(resp),
+		)
 	}
 
 	return resp, true
@@ -127,6 +149,13 @@ func (c *ResponseCache) Set(key string, resp *mdns.Msg) {
 	}
 
 	c.cache.SetWithTTL(key, entry, cost, time.Duration(minTTL)*time.Second)
+	if c.logger != nil {
+		c.logger.Debug("cache store",
+			"key", key,
+			"min_ttl", minTTL,
+			"negative", negative,
+		)
+	}
 }
 
 // Wait blocks until pending cache writes are applied.
