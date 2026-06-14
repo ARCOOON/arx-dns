@@ -82,9 +82,19 @@ func main() {
 	notifier := dnsproc.NewNotifier(cfg.XFR.Enabled, notifySlaves, cfg.ListenAddress(), stats, logger)
 
 	forwarder, err := dnsproc.NewForwarderFromConfig(cfg, stats)
-	if err != nil {
+	if err != nil && cfg.ResolverMode() == "forward" {
 		logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
 		os.Exit(1)
+	}
+
+	var iterative *dnsproc.IterativeResolver
+	if cfg.ResolverMode() == "iterative" {
+		iterative, err = dnsproc.NewIterativeFromConfig(cfg, stats)
+		if err != nil {
+			logger.Error("invalid iterative resolver configuration", "root_hints", cfg.Resolver.RootHints, "error", err)
+			os.Exit(1)
+		}
+		forwarder = nil
 	}
 
 	var cookieEngine *network.CookieEngine
@@ -97,7 +107,7 @@ func main() {
 		cookieEngine = network.NewCookieEngine(secret)
 	}
 
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
+	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
 
 	if err := storage.StartWatcher(ctx, cfg.Zones, store, logger, func() {
 		notifier.NotifyZones(dnsproc.ZoneOrigins(store.ListZones()))
@@ -133,6 +143,8 @@ func main() {
 		"event_loops", cfg.Server.EventLoops,
 		"zones", cfg.Zones.Directory,
 		"upstreams", cfg.Recursive.Upstreams,
+		"resolver_mode", cfg.ResolverMode(),
+		"root_hints", cfg.Resolver.RootHints,
 		"trusted_subnets", cfg.Recursive.TrustedSubnets,
 		"blocklists", cfg.Firewall.BlocklistsDirectory,
 		"block_action", fwAction,
