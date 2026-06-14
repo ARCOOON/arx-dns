@@ -10,6 +10,9 @@ config.toml
 *.test
 *.out
 
+# Frontend
+ui/node_modules/
+
 # Phase working notes (not versioned)
 /phases/
 /**/*_test.go
