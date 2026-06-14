@@ -18,7 +18,8 @@ import (
 
 const shutdownTimeout = 10 * time.Second
 
-// Server exposes a lightweight HTTP API for health checks, telemetry, and zone management.
+// Server exposes a lightweight HTTP API for health checks, telemetry, zone management,
+// and the embedded management WebUI (//go:embed all:dist in ui/embed.go).
 type Server struct {
 	cfg      config.Config
 	stats    *telemetry.Stats
@@ -55,6 +56,9 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, notif
 	mux.Handle("POST /api/v1/zones/reload", auth(http.HandlerFunc(s.handleZonesReload)))
 	mux.Handle("POST /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleCreateRecord)))
 	mux.Handle("DELETE /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleDeleteRecord)))
+
+	mux.HandleFunc("GET /{$}", handleWebUI)
+	mux.HandleFunc("GET /{path...}", handleWebUI)
 
 	s.server = &http.Server{
 		Addr:    cfg.API.Listen,
