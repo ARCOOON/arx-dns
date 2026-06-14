@@ -32,6 +32,7 @@ type Stats struct {
 	rrlDropped              atomic.Uint64
 	cookiesVerified         atomic.Uint64
 	cookiesRejected         atomic.Uint64
+	ecsQueriesForwarded     atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -66,6 +67,7 @@ type Snapshot struct {
 	RRLDropped              uint64 `json:"rrl_dropped"`
 	CookiesVerified         uint64 `json:"cookies_verified"`
 	CookiesRejected         uint64 `json:"cookies_rejected"`
+	ECSQueriesForwarded     uint64 `json:"ecs_queries_forwarded"`
 }
 
 // Snapshot returns the current counter values.
@@ -96,6 +98,7 @@ func (s *Stats) Snapshot() Snapshot {
 		RRLDropped:              s.rrlDropped.Load(),
 		CookiesVerified:         s.cookiesVerified.Load(),
 		CookiesRejected:         s.cookiesRejected.Load(),
+		ECSQueriesForwarded:     s.ecsQueriesForwarded.Load(),
 	}
 }
 
@@ -208,4 +211,8 @@ func (s *Stats) IncCookiesVerified() {
 
 func (s *Stats) IncCookiesRejected() {
 	s.cookiesRejected.Add(1)
+}
+
+func (s *Stats) IncECSQueriesForwarded() {
+	s.ecsQueriesForwarded.Add(1)
 }

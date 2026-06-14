@@ -55,6 +55,7 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "rrl_dropped_total", help: "Total number of DNS queries silently dropped by response rate limiting.", load: func(s Snapshot) float64 { return float64(s.RRLDropped) }},
 		{name: "cookies_verified_total", help: "Total number of DNS queries with a valid client and server cookie pair.", load: func(s Snapshot) float64 { return float64(s.CookiesVerified) }},
 		{name: "cookies_rejected_total", help: "Total number of DNS queries rejected with BADCOOKIE due to an invalid server cookie.", load: func(s Snapshot) float64 { return float64(s.CookiesRejected) }},
+		{name: "ecs_queries_forwarded_total", help: "Total number of recursive queries forwarded upstream with an EDNS Client Subnet option.", load: func(s Snapshot) float64 { return float64(s.ECSQueriesForwarded) }},
 	}
 
 	descs := make(map[string]*prometheus.Desc, len(specs))
