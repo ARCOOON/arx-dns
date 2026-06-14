@@ -84,6 +84,10 @@ func (p *Processor) handleDynamicUpdate(client netip.Addr, req *mdns.Msg, payloa
 		)
 	}
 
+	if p.notifier != nil {
+		p.notifier.NotifyZone(origin)
+	}
+
 	return p.updateResponse(req, mdns.RcodeSuccess, limitUDP, client, cookieCtx, tsigCtx)
 }
 

@@ -2,6 +2,7 @@ package dnsproc
 
 import (
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -42,11 +43,14 @@ type Processor struct {
 	cookies          CookieHandler
 	tsigSecrets      map[string]string
 	zonesDir         string
+	xfrEnabled       bool
+	xfrACL           TrustedChecker
+	notifier         ZoneChangeNotifier
 	logger           *slog.Logger
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, logger *slog.Logger) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, logger *slog.Logger) *Processor {
 	p := &Processor{
 		store:            store,
 		forwarder:        forwarder,
@@ -58,6 +62,9 @@ func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCac
 		cookies:          cookies,
 		tsigSecrets:      tsigSecrets,
 		zonesDir:         zonesDir,
+		xfrEnabled:       xfrEnabled,
+		xfrACL:           xfrACL,
+		notifier:         notifier,
 		logger:           logger,
 	}
 	if dnssecValidation && forwarder != nil {
@@ -73,7 +80,23 @@ func (p *Processor) Response(client netip.Addr, payload []byte) ([]byte, error) 
 
 // ResponseTCP parses a TCP DNS query and returns a full response without UDP size truncation.
 func (p *Processor) ResponseTCP(client netip.Addr, payload []byte) ([]byte, error) {
-	return p.buildResponse(client, payload, false)
+	var single []byte
+	var multiErr error
+	err := p.HandleTCP(client, payload, func(data []byte) error {
+		if single != nil {
+			multiErr = errors.New("unexpected multiple TCP response frames")
+			return multiErr
+		}
+		single = data
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if multiErr != nil {
+		return nil, multiErr
+	}
+	return single, nil
 }
 
 func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bool) ([]byte, error) {
@@ -106,6 +129,10 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 
 	trusted := p.clientTrusted(client)
 	q := req.Question[0]
+
+	if q.Qtype == mdns.TypeAXFR || q.Qtype == mdns.TypeIXFR {
+		return p.xfrRefusedResponse(req, client, cookieCtx, limitUDP)
+	}
 
 	if p.firewall != nil && p.firewall.Blocked(q.Name) {
 		return p.blockedResponse(req, q, limitUDP, client, cookieCtx)
