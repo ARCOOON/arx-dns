@@ -26,21 +26,21 @@
 
 ## 3. Operational Modes (Hybrid Architecture)
 
-- [ ] **Authoritative Mode:**
+- [x] **Authoritative Mode:**
   - [x] In-memory authoritative resolution with radix-tree storage and NXDOMAIN for unknown names (Phase 03).
   - [x] CNAME chain following for `A`/`AAAA` queries with loop protection and depth limit (Phase 06).
   - [x] Parsing and validation of standard BIND zone files (Phase 04).
   - [x] fsnotify hot-reload with atomic radix-tree swapping and 500ms debounce (Phase 05).
   - [x] Dynamic Updates (RFC 2136) secured via TSIG.
   - [x] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996) (Phase 28).
-- [ ] **Recursive / Resolver Mode:**
+- [x] **Recursive / Resolver Mode:**
   - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
   - [x] TTL-aware in-memory cache for recursive responses with hit/miss telemetry (Phase 08).
   - [x] ECS-aware cache keys for forwarded upstream responses (Phase 23).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` recursive responses (Phase 19).
   - [x] Full iterative resolution starting from root servers with delegation walking, glue/sub-query NS resolution, depth limit, and Ristretto cache integration (Phase 29).
   - [x] QNAME Minimization (RFC 7816) for enhanced privacy with SERVFAIL/REFUSED/timeout fallback and `qname_min_fallbacks` telemetry (Phase 30).
-- [ ] **Caching Engine:**
+- [x] **Caching Engine:**
   - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` responses with SOA-derived TTL (Phase 19).
   - [x] Lockless cache eviction strategies (LRU or LFU) via Ristretto TinyLFU (Phase 08).
@@ -90,11 +90,13 @@
 ## 8. Management, Automation & Observability
 
 - [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; `[ecs]` section for EDNS Client Subnet forwarding; `[resolver]` section for forward vs iterative recursive mode and root hints; `[xfr]` section for zone transfer ACLs and NOTIFY slaves; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22, Phase 23, Phase 28, Phase 29).
+
 - [~] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
+
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, NOTIFY sent/failed counters, QNAME minimization fallback counter, and RTT registry size (`rtt_tracked_ips`) (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
