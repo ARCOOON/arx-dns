@@ -112,6 +112,7 @@ trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
 [resolver]
 mode = 'forward'
 root_hints = ['198.41.0.4', '199.9.14.201', '192.33.4.12', '199.7.91.13', '192.203.230.10', '192.5.5.241', '192.32.92.29', '216.146.53.2', '192.36.134.14', '192.58.128.30', '193.0.14.129', '199.7.83.42', '202.12.27.33']
+qname_minimization = true
 
 [firewall]
 blocklists_directory = './blocklists'
@@ -173,6 +174,7 @@ tls_key = './certs/api.key'
 | `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                              |
 | `resolver.mode`                  | `forward`                                     | Recursive strategy: `forward` (upstream resolvers) or `iterative` (walk from root hints)       |
 | `resolver.root_hints`            | 13 IANA root IPv4 addresses                   | Root nameserver IPs for iterative mode (`RD=0` queries); default is the standard root hint set |
+| `resolver.qname_minimization`    | `true`                                        | In iterative mode, send minimized QNAMEs with QTYPE `NS` during delegation walks (RFC 7816)    |
 | `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                        |
 | `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                    |
 | `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                   |
@@ -357,7 +359,7 @@ dig @127.0.0.1 +short ads.example.com A    # NXDOMAIN (default)
 dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 ```
 
-When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server resolves it recursively using the configured `[resolver]` mode. In **`forward`** mode (default), queries are sent to `recursive.upstreams` sequentially with a 2-second timeout per attempt. In **`iterative`** mode, arx-dns walks the DNS delegation tree from `resolver.root_hints` with **RD=0**, following NS referrals, using glue records from the Additional section when present, and performing sub-queries to resolve nameserver hostnames when glue is absent. A strict depth limit (15 iterations) prevents infinite referral loops; exceeded depth returns `SERVFAIL`.
+When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server resolves it recursively using the configured `[resolver]` mode. In **`forward`** mode (default), queries are sent to `recursive.upstreams` sequentially with a 2-second timeout per attempt. In **`iterative`** mode, arx-dns walks the DNS delegation tree from `resolver.root_hints` with **RD=0**, following NS referrals, using glue records from the Additional section when present, and performing sub-queries to resolve nameserver hostnames when glue is absent. When `resolver.qname_minimization` is enabled (default), outbound delegation queries use progressively unmasked QNAMEs with QTYPE `NS` per RFC 7816 so root and TLD servers never see the full client QNAME. If a minimized query receives `SERVFAIL`, `REFUSED`, or times out, the resolver automatically retries with the full QNAME and original QTYPE; each fallback increments `qname_min_fallbacks` (`arxdns_qname_min_fallbacks_total` in Prometheus). A strict depth limit (15 iterations) prevents infinite referral loops; exceeded depth returns `SERVFAIL`.
 
 Both modes share the same in-memory response cache keyed by question name, type, class, and EDNS Client Subnet scope when present (see **EDNS Client Subnet** below). On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately. On a cache miss, the resolver performs the lookup, stores the result, and returns it to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. Resolution failures return `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
