@@ -53,6 +53,8 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "dnssec_validations_passed_total", help: "Total number of forwarded upstream responses that passed DNSSEC signature verification.", load: func(s Snapshot) float64 { return float64(s.DNSSECValidationsPassed) }},
 		{name: "dnssec_validations_failed_total", help: "Total number of forwarded upstream responses rejected as BOGUS after DNSSEC checks.", load: func(s Snapshot) float64 { return float64(s.DNSSECValidationsFailed) }},
 		{name: "rrl_dropped_total", help: "Total number of DNS queries silently dropped by response rate limiting.", load: func(s Snapshot) float64 { return float64(s.RRLDropped) }},
+		{name: "cookies_verified_total", help: "Total number of DNS queries with a valid client and server cookie pair.", load: func(s Snapshot) float64 { return float64(s.CookiesVerified) }},
+		{name: "cookies_rejected_total", help: "Total number of DNS queries rejected with BADCOOKIE due to an invalid server cookie.", load: func(s Snapshot) float64 { return float64(s.CookiesRejected) }},
 	}
 
 	descs := make(map[string]*prometheus.Desc, len(specs))

@@ -30,6 +30,8 @@ type Stats struct {
 	dnssecValidationsPassed atomic.Uint64
 	dnssecValidationsFailed atomic.Uint64
 	rrlDropped              atomic.Uint64
+	cookiesVerified         atomic.Uint64
+	cookiesRejected         atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -62,6 +64,8 @@ type Snapshot struct {
 	DNSSECValidationsPassed uint64 `json:"dnssec_validations_passed"`
 	DNSSECValidationsFailed uint64 `json:"dnssec_validations_failed"`
 	RRLDropped              uint64 `json:"rrl_dropped"`
+	CookiesVerified         uint64 `json:"cookies_verified"`
+	CookiesRejected         uint64 `json:"cookies_rejected"`
 }
 
 // Snapshot returns the current counter values.
@@ -90,6 +94,8 @@ func (s *Stats) Snapshot() Snapshot {
 		DNSSECValidationsPassed: s.dnssecValidationsPassed.Load(),
 		DNSSECValidationsFailed: s.dnssecValidationsFailed.Load(),
 		RRLDropped:              s.rrlDropped.Load(),
+		CookiesVerified:         s.cookiesVerified.Load(),
+		CookiesRejected:         s.cookiesRejected.Load(),
 	}
 }
 
@@ -194,4 +200,12 @@ func (s *Stats) IncDNSSECValidationFailed() {
 
 func (s *Stats) IncRRLDropped() {
 	s.rrlDropped.Add(1)
+}
+
+func (s *Stats) IncCookiesVerified() {
+	s.cookiesVerified.Add(1)
+}
+
+func (s *Stats) IncCookiesRejected() {
+	s.cookiesRejected.Add(1)
 }
