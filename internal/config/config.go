@@ -1,7 +1,9 @@
 package config
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -33,9 +35,11 @@ type RateLimitConfig struct {
 	Burst             int  `toml:"burst"`
 }
 
-// SecurityConfig controls DNSSEC and related validation policies.
+// SecurityConfig controls DNSSEC, DNS Cookies, and related validation policies.
 type SecurityConfig struct {
-	DNSSECValidation bool `toml:"dnssec_validation"`
+	DNSSECValidation  bool   `toml:"dnssec_validation"`
+	DNSCookiesEnabled bool   `toml:"dns_cookies_enabled"`
+	DNSCookieSecret   string `toml:"dns_cookie_secret"`
 }
 
 // ServerConfig controls the DNS listener bind address and reactor sizing.
@@ -133,7 +137,8 @@ func Default() Config {
 			BlockAction:         defaultBlockAction,
 		},
 		Security: SecurityConfig{
-			DNSSECValidation: true,
+			DNSSECValidation:  true,
+			DNSCookiesEnabled: true,
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:           true,
@@ -152,6 +157,9 @@ func Load(path string) (Config, error) {
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		cfg := Default()
+		if err := cfg.EnsureDNSCookieSecret(path); err != nil {
+			return Config{}, fmt.Errorf("ensure dns cookie secret: %w", err)
+		}
 		if err := Write(path, cfg); err != nil {
 			return Config{}, fmt.Errorf("create default config %q: %w", path, err)
 		}
@@ -169,6 +177,9 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults()
+	if err := cfg.EnsureDNSCookieSecret(path); err != nil {
+		return Config{}, fmt.Errorf("ensure dns cookie secret: %w", err)
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate config %q: %w", path, err)
 	}
@@ -273,8 +284,74 @@ func (c Config) Validate() error {
 	if err := c.validateRateLimit(); err != nil {
 		return err
 	}
+	if err := c.validateSecurity(); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+// EnsureDNSCookieSecret generates and persists a random 32-byte hex secret when DNS
+// Cookies are enabled and dns_cookie_secret is empty.
+func (c *Config) EnsureDNSCookieSecret(path string) error {
+	if !c.Security.DNSCookiesEnabled {
+		return nil
+	}
+	if strings.TrimSpace(c.Security.DNSCookieSecret) != "" {
+		return nil
+	}
+
+	secret, err := generateDNSCookieSecret()
+	if err != nil {
+		return err
+	}
+	c.Security.DNSCookieSecret = secret
+
+	if path == "" {
+		return nil
+	}
+	return Write(path, *c)
+}
+
+// DNSCookieSecretBytes decodes the configured hex secret into a 32-byte slice.
+func (c Config) DNSCookieSecretBytes() ([]byte, error) {
+	secret := strings.TrimSpace(c.Security.DNSCookieSecret)
+	if secret == "" {
+		return nil, errors.New("dns_cookie_secret is empty")
+	}
+	raw, err := hex.DecodeString(secret)
+	if err != nil {
+		return nil, fmt.Errorf("decode dns_cookie_secret: %w", err)
+	}
+	if len(raw) != 32 {
+		return nil, fmt.Errorf("dns_cookie_secret must decode to 32 bytes, got %d", len(raw))
+	}
+	return raw, nil
+}
+
+func (c Config) validateSecurity() error {
+	if !c.Security.DNSCookiesEnabled {
+		return nil
+	}
+	secret := strings.TrimSpace(c.Security.DNSCookieSecret)
+	if secret == "" {
+		return errors.New("security.dns_cookie_secret must be set when dns_cookies_enabled is true")
+	}
+	if len(secret) != 64 {
+		return errors.New("security.dns_cookie_secret must be a 64-character hex string (32 bytes)")
+	}
+	if _, err := hex.DecodeString(secret); err != nil {
+		return fmt.Errorf("security.dns_cookie_secret: %w", err)
+	}
+	return nil
+}
+
+func generateDNSCookieSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("generate dns cookie secret: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func (c Config) validateRateLimit() error {
