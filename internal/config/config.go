@@ -24,6 +24,7 @@ type Config struct {
 	API       APIConfig       `toml:"api"`
 	Zones     ZonesConfig     `toml:"zones"`
 	Recursive RecursiveConfig `toml:"recursive"`
+	Resolver  ResolverConfig  `toml:"resolver"`
 	Firewall  FirewallConfig  `toml:"firewall"`
 	Security  SecurityConfig  `toml:"security"`
 	RateLimit RateLimitConfig `toml:"rate_limit"`
@@ -104,6 +105,12 @@ type RecursiveConfig struct {
 	TrustedSubnets []string `toml:"trusted_subnets"`
 }
 
+// ResolverConfig selects recursive resolution strategy (forward vs iterative from root hints).
+type ResolverConfig struct {
+	Mode      string   `toml:"mode"`
+	RootHints []string `toml:"root_hints"`
+}
+
 // FirewallConfig controls DNS blocklist loading and block actions.
 type FirewallConfig struct {
 	BlocklistsDirectory string `toml:"blocklists_directory"`
@@ -126,7 +133,27 @@ const (
 	defaultRateLimitBurst    = 200
 	defaultECSIPv4PrefixLen  = 24
 	defaultECSIPv6PrefixLen  = 56
+	defaultResolverMode      = "forward"
 )
+
+// DefaultRootHints returns the 13 standard IPv4 root server addresses (RFC root hint set).
+func DefaultRootHints() []string {
+	return []string{
+		"198.41.0.4",
+		"199.9.14.201",
+		"192.33.4.12",
+		"199.7.91.13",
+		"192.203.230.10",
+		"192.5.5.241",
+		"192.32.92.29",
+		"216.146.53.2",
+		"192.36.134.14",
+		"192.58.128.30",
+		"193.0.14.129",
+		"199.7.83.42",
+		"202.12.27.33",
+	}
+}
 
 // Default returns a Config populated with the same defaults as the legacy CLI flags.
 func Default() Config {
@@ -157,6 +184,10 @@ func Default() Config {
 				"10.0.0.0/8",
 				"192.168.0.0/16",
 			},
+		},
+		Resolver: ResolverConfig{
+			Mode:      defaultResolverMode,
+			RootHints: DefaultRootHints(),
 		},
 		Firewall: FirewallConfig{
 			BlocklistsDirectory: defaultBlocklistsDir,
@@ -288,6 +319,12 @@ func (c *Config) applyDefaults() {
 	if c.ECS.IPv6PrefixLength == 0 {
 		c.ECS.IPv6PrefixLength = def.ECS.IPv6PrefixLength
 	}
+	if strings.TrimSpace(c.Resolver.Mode) == "" {
+		c.Resolver.Mode = def.Resolver.Mode
+	}
+	if len(c.Resolver.RootHints) == 0 {
+		c.Resolver.RootHints = append([]string(nil), def.Resolver.RootHints...)
+	}
 }
 
 // Validate checks that all configuration fields are usable at runtime.
@@ -310,7 +347,7 @@ func (c Config) Validate() error {
 	if _, err := c.TrustedSubnetsCSV(); err != nil {
 		return err
 	}
-	if _, err := c.NormalizedUpstreams(); err != nil {
+	if err := c.validateResolver(); err != nil {
 		return err
 	}
 	if err := c.validateTLS(); err != nil {
@@ -595,6 +632,71 @@ func (c Config) TrustedSubnetsCSV() (string, error) {
 		parts = append(parts, subnet)
 	}
 	return strings.Join(parts, ","), nil
+}
+
+// ResolverMode returns the normalized resolver mode ("forward" or "iterative").
+func (c Config) ResolverMode() string {
+	mode := strings.ToLower(strings.TrimSpace(c.Resolver.Mode))
+	if mode == "" {
+		return defaultResolverMode
+	}
+	return mode
+}
+
+func (c Config) validateResolver() error {
+	switch c.ResolverMode() {
+	case "forward":
+		if _, err := c.NormalizedUpstreams(); err != nil {
+			return err
+		}
+	case "iterative":
+		if _, err := c.NormalizedRootHints(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("resolver.mode must be forward or iterative, got %q", c.Resolver.Mode)
+	}
+	return nil
+}
+
+// NormalizedRootHints returns root server addresses in host:port form.
+func (c Config) NormalizedRootHints() ([]string, error) {
+	hints := c.Resolver.RootHints
+	if len(hints) == 0 {
+		hints = DefaultRootHints()
+	}
+
+	out := make([]string, 0, len(hints))
+	for _, raw := range hints {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+
+		host, port, err := net.SplitHostPort(raw)
+		if err != nil {
+			if strings.Contains(err.Error(), "missing port") {
+				if net.ParseIP(raw) == nil {
+					return nil, fmt.Errorf("invalid root hint IP %q", raw)
+				}
+				out = append(out, net.JoinHostPort(raw, "53"))
+				continue
+			}
+			return nil, fmt.Errorf("invalid root hint %q: %w", raw, err)
+		}
+		if net.ParseIP(host) == nil {
+			return nil, fmt.Errorf("invalid root hint IP %q", host)
+		}
+		if port == "" {
+			return nil, fmt.Errorf("invalid root hint address %q", raw)
+		}
+		out = append(out, net.JoinHostPort(host, port))
+	}
+
+	if len(out) == 0 {
+		return nil, errors.New("at least one root hint is required for iterative resolution")
+	}
+	return out, nil
 }
 
 // NormalizedUpstreams returns upstream resolver addresses in host:port form.
