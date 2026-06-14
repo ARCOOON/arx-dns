@@ -40,11 +40,6 @@ func main() {
 	store := storage.NewMemory()
 	storage.LoadZones(cfg.Zones, store, logger)
 
-	if err := storage.StartWatcher(ctx, cfg.Zones, store, logger); err != nil {
-		logger.Error("failed to start zone file watcher", "directory", cfg.Zones.Directory, "error", err)
-		os.Exit(1)
-	}
-
 	fwAction, err := firewall.ParseBlockAction(cfg.Firewall.BlockAction)
 	if err != nil {
 		logger.Error("invalid firewall block action", "block_action", cfg.Firewall.BlockAction, "error", err)
@@ -73,6 +68,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	xfrACL, err := network.ACLFromXFRConfig(cfg)
+	if err != nil {
+		logger.Error("invalid zone transfer ACL configuration", "allowed_subnets", cfg.XFR.AllowedSubnets, "error", err)
+		os.Exit(1)
+	}
+
+	notifySlaves, err := cfg.NormalizedNotifySlaves()
+	if err != nil {
+		logger.Error("invalid notify slaves configuration", "notify_slaves", cfg.XFR.NotifySlaves, "error", err)
+		os.Exit(1)
+	}
+	notifier := dnsproc.NewNotifier(cfg.XFR.Enabled, notifySlaves, cfg.ListenAddress(), stats, logger)
+
 	forwarder, err := dnsproc.NewForwarderFromConfig(cfg, stats)
 	if err != nil {
 		logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
@@ -89,7 +97,14 @@ func main() {
 		cookieEngine = network.NewCookieEngine(secret)
 	}
 
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, logger)
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
+
+	if err := storage.StartWatcher(ctx, cfg.Zones, store, logger, func() {
+		notifier.NotifyZones(dnsproc.ZoneOrigins(store.ListZones()))
+	}); err != nil {
+		logger.Error("failed to start zone file watcher", "directory", cfg.Zones.Directory, "error", err)
+		os.Exit(1)
+	}
 
 	rrl := network.NewRateLimiter(cfg.RateLimit, stats)
 	defer rrl.Close()
@@ -128,8 +143,11 @@ func main() {
 		"rate_limit_rps", cfg.RateLimit.RequestsPerSecond,
 		"rate_limit_burst", cfg.RateLimit.Burst,
 		"dynamic_update_keys", len(cfg.Update.Keys),
+		"xfr_enabled", cfg.XFR.Enabled,
+		"xfr_allowed_subnets", cfg.XFR.AllowedSubnets,
+		"notify_slaves", cfg.XFR.NotifySlaves,
 	)
-	apiServer := api.New(cfg, stats, store, logger)
+	apiServer := api.New(cfg, stats, store, notifier, logger)
 	startService("api", apiServer.Run)
 	startService("udp", reactors.UDP.Run)
 	startService("tcp", reactors.TCP.Run)
