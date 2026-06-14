@@ -211,11 +211,14 @@ Zone files and the management API accept unknown RR types using BIND generic syn
 custom  300  IN  TYPE65280  \# 2 aabb
 ```
 
-API create example:
+API create examples:
 
 ```json
 {"name":"custom","type":"TYPE65280","ttl":300,"value":"\\# 2 aabb"}
+{"name":"opaque","type":"65281","ttl":300,"value":"ccddee"}
 ```
+
+The `value` field accepts BIND `\# <length> <hex>` syntax, `<length> <hex>`, or bare hex (length is derived from the digit count). Declared length must match the hex payload.
 
 Unknown types are stored opaquely in the radix tree and served back to clients with identical wire data. Zone rewrites preserve `TYPE<id>` and `\#` formatting.
 
