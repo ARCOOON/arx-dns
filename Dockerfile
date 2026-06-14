@@ -12,8 +12,12 @@ COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /out/arx-dns ./cmd/arx-dns/
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && cd ui && npm ci && npm run build \
+    && cd .. \
+    && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/arx-dns ./cmd/arx-dns/ \
+    && apt-get purge -y nodejs npm && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /runtime/etc/arx-dns/zones /runtime/etc/arx-dns/blocklists
 
