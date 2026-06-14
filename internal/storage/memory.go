@@ -167,3 +167,52 @@ func lookupInTree(tree *radix.Tree, name string, qtype uint16) ([]mdns.RR, Looku
 	copy(out, rrs)
 	return out, LookupFound
 }
+
+// NameExistsPublic reports whether any resource records exist for name in the public view.
+func (m *Memory) NameExistsPublic(name string) bool {
+	return nameExistsInTree(m.publicTree(), name)
+}
+
+// NameExistsInternal reports whether any resource records exist for name in the internal view.
+func (m *Memory) NameExistsInternal(name string) bool {
+	return nameExistsInTree(m.internalTree(), name)
+}
+
+func nameExistsInTree(tree *radix.Tree, name string) bool {
+	if tree == nil {
+		return false
+	}
+	_, ok := tree.Get(NormalizeName(name))
+	return ok
+}
+
+// LookupAllAtName returns every resource record stored at name in the public view.
+func (m *Memory) LookupAllAtName(name string) ([]mdns.RR, LookupStatus) {
+	return lookupAllAtName(m.publicTree(), name)
+}
+
+// LookupAllAtNameInternal returns every resource record stored at name in the internal view.
+func (m *Memory) LookupAllAtNameInternal(name string) ([]mdns.RR, LookupStatus) {
+	return lookupAllAtName(m.internalTree(), name)
+}
+
+func lookupAllAtName(tree *radix.Tree, name string) ([]mdns.RR, LookupStatus) {
+	name = NormalizeName(name)
+
+	raw, ok := tree.Get(name)
+	if !ok {
+		return nil, LookupNotFound
+	}
+
+	byType := raw.(map[uint16][]mdns.RR)
+	var out []mdns.RR
+	for _, rrs := range byType {
+		for _, rr := range rrs {
+			out = append(out, mdns.Copy(rr))
+		}
+	}
+	if len(out) == 0 {
+		return nil, LookupNodata
+	}
+	return out, LookupFound
+}

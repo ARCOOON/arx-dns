@@ -47,7 +47,20 @@ func BuildRecord(zoneOrigin string, in RecordInput) (mdns.RR, error) {
 		return buildTXTRecord(fqdn, ttl, value)
 	case "SRV":
 		return buildSRVRecord(fqdn, ttl, value)
+	case "NS":
+		return buildNSRecord(fqdn, ttl, value)
+	case "SOA":
+		return buildSOARecord(fqdn, ttl, value)
+	case "PTR":
+		return buildPTRRecord(fqdn, ttl, value)
+	case "CAA":
+		return buildCAARecord(fqdn, ttl, value)
+	case "SVCB", "HTTPS":
+		return buildSVCBRecord(fqdn, ttl, typ, value)
 	default:
+		if strings.HasPrefix(typ, "TYPE") {
+			return buildRFC3597Record(fqdn, ttl, typ, value)
+		}
 		line := fmt.Sprintf("%s %d IN %s %s", fqdn, ttl, typ, value)
 		rr, err := mdns.NewRR(line)
 		if err != nil {
@@ -110,6 +123,164 @@ func buildSRVRecord(owner string, ttl uint32, value string) (mdns.RR, error) {
 		Port:     port,
 		Target:   target,
 	}, nil
+}
+
+func buildNSRecord(owner string, ttl uint32, value string) (mdns.RR, error) {
+	target, err := qualifyHostTarget(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid NS target: %w", err)
+	}
+
+	return &mdns.NS{
+		Hdr: mdns.RR_Header{
+			Name:   owner,
+			Rrtype: mdns.TypeNS,
+			Class:  mdns.ClassINET,
+			Ttl:    ttl,
+		},
+		Ns: target,
+	}, nil
+}
+
+func buildSOARecord(owner string, ttl uint32, value string) (mdns.RR, error) {
+	ns, mbox, serial, refresh, retry, expire, minimum, err := parseSOAValue(value)
+	if err != nil {
+		return nil, err
+	}
+
+	return &mdns.SOA{
+		Hdr: mdns.RR_Header{
+			Name:   owner,
+			Rrtype: mdns.TypeSOA,
+			Class:  mdns.ClassINET,
+			Ttl:    ttl,
+		},
+		Ns:      ns,
+		Mbox:    mbox,
+		Serial:  serial,
+		Refresh: refresh,
+		Retry:   retry,
+		Expire:  expire,
+		Minttl:  minimum,
+	}, nil
+}
+
+func buildPTRRecord(owner string, ttl uint32, value string) (mdns.RR, error) {
+	target, err := qualifyHostTarget(value)
+	if err != nil {
+		return nil, fmt.Errorf("invalid PTR target: %w", err)
+	}
+
+	return &mdns.PTR{
+		Hdr: mdns.RR_Header{
+			Name:   owner,
+			Rrtype: mdns.TypePTR,
+			Class:  mdns.ClassINET,
+			Ttl:    ttl,
+		},
+		Ptr: target,
+	}, nil
+}
+
+func buildCAARecord(owner string, ttl uint32, value string) (mdns.RR, error) {
+	line := fmt.Sprintf("%s %d IN CAA %s", owner, ttl, value)
+	rr, err := mdns.NewRR(line)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CAA record: %w", err)
+	}
+	return rr, nil
+}
+
+func buildSVCBRecord(owner string, ttl uint32, typ, value string) (mdns.RR, error) {
+	line := fmt.Sprintf("%s %d IN %s %s", owner, ttl, typ, value)
+	rr, err := mdns.NewRR(line)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s record: %w", typ, err)
+	}
+	return rr, nil
+}
+
+func buildRFC3597Record(owner string, ttl uint32, typ string, value string) (mdns.RR, error) {
+	num := strings.TrimPrefix(typ, "TYPE")
+	if num == "" {
+		return nil, fmt.Errorf("invalid record type %q", typ)
+	}
+	typeCode, err := strconv.ParseUint(num, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("invalid record type %q", typ)
+	}
+
+	rdata := strings.TrimSpace(value)
+	if rdata == "" {
+		return nil, fmt.Errorf("RFC 3597 value is required")
+	}
+	if !strings.HasPrefix(rdata, `\#`) {
+		fields := strings.Fields(rdata)
+		if len(fields) < 2 {
+			return nil, fmt.Errorf("RFC 3597 value must use \\# <length> <hex> syntax")
+		}
+		rdata = `\# ` + strings.Join(fields, " ")
+	}
+
+	line := fmt.Sprintf("%s %d IN %s %s", owner, ttl, typ, rdata)
+	rr, err := mdns.NewRR(line)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s record: %w", typ, err)
+	}
+	if _, ok := rr.(*mdns.RFC3597); !ok {
+		return nil, fmt.Errorf("%s did not produce an RFC 3597 record", typ)
+	}
+	if rr.Header().Rrtype != uint16(typeCode) {
+		return nil, fmt.Errorf("record type mismatch for %s", typ)
+	}
+	return rr, nil
+}
+
+func parseSOAValue(value string) (ns, mbox string, serial, refresh, retry, expire, minimum uint32, err error) {
+	fields := strings.Fields(value)
+	if len(fields) < 7 {
+		return "", "", 0, 0, 0, 0, 0, fmt.Errorf("SOA value must be ns mbox serial refresh retry expire minimum")
+	}
+
+	ns, err = qualifyHostTarget(fields[0])
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, fmt.Errorf("invalid SOA nameserver: %w", err)
+	}
+	mbox, err = qualifyHostTarget(fields[1])
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, fmt.Errorf("invalid SOA mailbox: %w", err)
+	}
+
+	serial, err = parseSOAField(fields[2], "serial")
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, err
+	}
+	refresh, err = parseSOAField(fields[3], "refresh")
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, err
+	}
+	retry, err = parseSOAField(fields[4], "retry")
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, err
+	}
+	expire, err = parseSOAField(fields[5], "expire")
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, err
+	}
+	minimum, err = parseSOAField(fields[6], "minimum")
+	if err != nil {
+		return "", "", 0, 0, 0, 0, 0, err
+	}
+
+	return ns, mbox, serial, refresh, retry, expire, minimum, nil
+}
+
+func parseSOAField(raw, field string) (uint32, error) {
+	n, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("invalid SOA %s %q", field, raw)
+	}
+	return uint32(n), nil
 }
 
 func parseMXValue(value string) (uint16, string, error) {
@@ -285,6 +456,17 @@ func parseRecordType(typeName string) (uint16, error) {
 	if typeName == "" {
 		return 0, fmt.Errorf("record type is required")
 	}
+	if strings.HasPrefix(typeName, "TYPE") {
+		num := strings.TrimPrefix(typeName, "TYPE")
+		if num == "" {
+			return 0, fmt.Errorf("invalid record type %q", typeName)
+		}
+		n, err := strconv.ParseUint(num, 10, 16)
+		if err != nil {
+			return 0, fmt.Errorf("invalid record type %q", typeName)
+		}
+		return uint16(n), nil
+	}
 	qtype, ok := mdns.StringToType[typeName]
 	if !ok {
 		return 0, fmt.Errorf("unsupported record type %q", typeName)
@@ -317,6 +499,13 @@ func rrDataValue(rr mdns.RR) string {
 		return typed.Ptr
 	case *mdns.SRV:
 		return fmt.Sprintf("%d %d %d %s", typed.Priority, typed.Weight, typed.Port, typed.Target)
+	case *mdns.SOA:
+		return fmt.Sprintf("%s %s %d %d %d %d %d",
+			typed.Ns, typed.Mbox, typed.Serial, typed.Refresh, typed.Retry, typed.Expire, typed.Minttl)
+	case *mdns.CAA:
+		return fmt.Sprintf("%d %s %s", typed.Flag, typed.Tag, formatCAAValue(typed.Value))
+	case *mdns.RFC3597:
+		return formatRFC3597Rdata(typed)
 	default:
 		fields := strings.Fields(rr.String())
 		if len(fields) < 5 {
@@ -349,4 +538,21 @@ func escapeTXTChunk(chunk string) string {
 		}
 	}
 	return b.String()
+}
+
+func formatCAAValue(value string) string {
+	if value == "" {
+		return `""`
+	}
+	if strings.ContainsAny(value, " \t\"") {
+		return `"` + escapeTXTChunk(value) + `"`
+	}
+	return value
+}
+
+func formatRFC3597Rdata(rr *mdns.RFC3597) string {
+	if rr == nil {
+		return ""
+	}
+	return fmt.Sprintf(`\# %d %s`, len(rr.Rdata)/2, rr.Rdata)
 }

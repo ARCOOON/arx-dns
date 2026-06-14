@@ -241,8 +241,17 @@ func formatZoneLine(rr mdns.RR, origin string) (string, error) {
 
 	hdr := rr.Header()
 	owner := relativeOwnerName(hdr.Name, origin)
-	typ := mdns.Type(hdr.Rrtype).String()
 	rdata := rrDataValue(rr)
+
+	if r3597, ok := rr.(*mdns.RFC3597); ok {
+		typ := fmt.Sprintf("TYPE%d", r3597.Hdr.Rrtype)
+		if rdata == "" {
+			return "", fmt.Errorf("empty rdata for %s %s", owner, typ)
+		}
+		return fmt.Sprintf("%s %d IN %s %s", owner, hdr.Ttl, typ, rdata), nil
+	}
+
+	typ := mdns.Type(hdr.Rrtype).String()
 	if rdata == "" {
 		return "", fmt.Errorf("empty rdata for %s %s", owner, typ)
 	}
