@@ -661,9 +661,7 @@ func (c Config) validateResolver() error {
 			return err
 		}
 	case "iterative":
-		if _, err := c.NormalizedRootHints(); err != nil {
-			return err
-		}
+		// Root hints are loaded dynamically at runtime from ./named.root.
 	default:
 		return fmt.Errorf("resolver.mode must be forward or iterative, got %q", c.Resolver.Mode)
 	}
