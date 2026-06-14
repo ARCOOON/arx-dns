@@ -18,11 +18,12 @@ const defaultReloadDebounce = 500 * time.Millisecond
 
 // StartWatcher watches cfg.Directory and its internal subdirectory for create,
 // write, and remove events on .zone files and hot-reloads both views atomically.
-func StartWatcher(ctx context.Context, cfg config.ZonesConfig, store *Memory, logger *slog.Logger) error {
-	return startWatcher(ctx, cfg.Directory, store, logger)
+// When onReload is non-nil it is invoked after each debounced reload completes.
+func StartWatcher(ctx context.Context, cfg config.ZonesConfig, store *Memory, logger *slog.Logger, onReload func()) error {
+	return startWatcher(ctx, cfg.Directory, store, logger, defaultReloadDebounce, onReload)
 }
 
-func startWatcher(ctx context.Context, dir string, store *Memory, logger *slog.Logger) error {
+func startWatcher(ctx context.Context, dir string, store *Memory, logger *slog.Logger, debounce time.Duration, onReload func()) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -38,8 +39,8 @@ func startWatcher(ctx context.Context, dir string, store *Memory, logger *slog.L
 	}
 	watchInternalDir(watcher, dir, logger)
 
-	go runWatcher(ctx, watcher, dir, store, logger, defaultReloadDebounce)
-	logger.Info("zone file watcher started", "directory", dir, "debounce", defaultReloadDebounce.String())
+	go runWatcher(ctx, watcher, dir, store, logger, debounce, onReload)
+	logger.Info("zone file watcher started", "directory", dir, "debounce", debounce.String())
 	return nil
 }
 
@@ -53,7 +54,7 @@ func watchInternalDir(watcher *fsnotify.Watcher, root string, logger *slog.Logge
 	}
 }
 
-func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, store *Memory, logger *slog.Logger, debounce time.Duration) {
+func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, store *Memory, logger *slog.Logger, debounce time.Duration, onReload func()) {
 	defer watcher.Close()
 
 	var (
@@ -62,6 +63,9 @@ func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, stor
 		reload = func(trigger string) {
 			logger.Info("zone reload triggered", "directory", dir, "trigger", trigger)
 			LoadZonesFromDir(dir, store, logger)
+			if onReload != nil {
+				onReload()
+			}
 		}
 		scheduleReload = func(trigger string) {
 			mu.Lock()

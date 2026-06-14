@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -215,4 +216,25 @@ func lookupAllAtName(tree *radix.Tree, name string) ([]mdns.RR, LookupStatus) {
 		return nil, LookupNodata
 	}
 	return out, LookupFound
+}
+
+// ZoneRecords returns every resource record in origin for view, sorted for AXFR.
+func (m *Memory) ZoneRecords(origin string, view ZoneView) []mdns.RR {
+	if m == nil {
+		return nil
+	}
+	origin = NormalizeName(origin)
+	rrs := collectZoneRecords(m.treeForView(view), origin)
+	sort.Slice(rrs, func(i, j int) bool {
+		left := rrs[i].Header()
+		right := rrs[j].Header()
+		if left.Name != right.Name {
+			return left.Name < right.Name
+		}
+		if left.Rrtype != right.Rrtype {
+			return left.Rrtype < right.Rrtype
+		}
+		return rrDataValue(rrs[i]) < rrDataValue(rrs[j])
+	})
+	return rrs
 }
