@@ -79,7 +79,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, logger)
+	var cookieEngine *network.CookieEngine
+	if cfg.Security.DNSCookiesEnabled {
+		secret, err := cfg.DNSCookieSecretBytes()
+		if err != nil {
+			logger.Error("invalid dns cookie secret", "error", err)
+			os.Exit(1)
+		}
+		cookieEngine = network.NewCookieEngine(secret)
+	}
+
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, logger)
 
 	rrl := network.NewRateLimiter(cfg.RateLimit, stats)
 	defer rrl.Close()
@@ -113,6 +123,7 @@ func main() {
 		"block_action", fwAction,
 		"encrypted_dns", cfg.EncryptedDNSEnabled(),
 		"dnssec_validation", cfg.Security.DNSSECValidation,
+		"dns_cookies_enabled", cfg.Security.DNSCookiesEnabled,
 		"rate_limit_enabled", cfg.RateLimit.Enabled,
 		"rate_limit_rps", cfg.RateLimit.RequestsPerSecond,
 		"rate_limit_burst", cfg.RateLimit.Burst,
