@@ -72,6 +72,7 @@ type ServerConfig struct {
 	Listen     string `toml:"listen"`
 	Port       int    `toml:"port"`
 	EventLoops int    `toml:"event_loops"`
+	LogLevel   string `toml:"log_level"`
 }
 
 // TLSConfig holds the server certificate and private key for encrypted DNS transports.
@@ -135,6 +136,7 @@ const (
 	defaultECSIPv4PrefixLen  = 24
 	defaultECSIPv6PrefixLen  = 56
 	defaultResolverMode      = "forward"
+	defaultLogLevel          = "INFO"
 )
 
 // DefaultRootHints returns the 13 standard IPv4 root server addresses (RFC root hint set).
@@ -163,6 +165,7 @@ func Default() Config {
 			Listen:     defaultListen,
 			Port:       defaultPort,
 			EventLoops: 0,
+			LogLevel:   defaultLogLevel,
 		},
 		Listeners: ListenersConfig{
 			DoT: defaultDoTListen,
@@ -282,6 +285,9 @@ func (c *Config) applyDefaults() {
 	if c.Server.Port == 0 {
 		c.Server.Port = def.Server.Port
 	}
+	if strings.TrimSpace(c.Server.LogLevel) == "" {
+		c.Server.LogLevel = def.Server.LogLevel
+	}
 	if strings.TrimSpace(c.Zones.Directory) == "" {
 		c.Zones.Directory = def.Zones.Directory
 	}
@@ -336,6 +342,9 @@ func (c Config) Validate() error {
 	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
+	}
+	if err := validateLogLevel(c.Server.LogLevel); err != nil {
+		return err
 	}
 	if strings.TrimSpace(c.Zones.Directory) == "" {
 		return errors.New("zones.directory must not be empty")
@@ -786,6 +795,15 @@ func normalizeNotifySlave(raw string) (string, error) {
 		return net.JoinHostPort(raw, "53"), nil
 	}
 	return net.JoinHostPort(raw, "53"), nil
+}
+
+func validateLogLevel(raw string) error {
+	switch strings.ToUpper(strings.TrimSpace(raw)) {
+	case "DEBUG", "INFO", "WARN", "WARNING", "ERROR":
+		return nil
+	default:
+		return fmt.Errorf("server.log_level must be DEBUG, INFO, WARN, or ERROR, got %q", raw)
+	}
 }
 
 func validateBlockAction(raw string) error {
