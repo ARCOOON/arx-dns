@@ -40,11 +40,13 @@ type Processor struct {
 	dnssecValidation bool
 	validator        *DNSSECValidator
 	cookies          CookieHandler
+	tsigSecrets      map[string]string
+	zonesDir         string
 	logger           *slog.Logger
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, logger *slog.Logger) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, logger *slog.Logger) *Processor {
 	p := &Processor{
 		store:            store,
 		forwarder:        forwarder,
@@ -54,6 +56,8 @@ func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCac
 		firewall:         fw,
 		dnssecValidation: dnssecValidation,
 		cookies:          cookies,
+		tsigSecrets:      tsigSecrets,
+		zonesDir:         zonesDir,
 		logger:           logger,
 	}
 	if dnssecValidation && forwarder != nil {
@@ -85,6 +89,10 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 	cookieCtx := p.parseRequestCookie(req, client)
 	if cookieCtx.rejectBadCookie {
 		return p.badCookieResponse(req, client, cookieCtx, limitUDP)
+	}
+
+	if req.Opcode == mdns.OpcodeUpdate {
+		return p.handleDynamicUpdate(client, req, payload, limitUDP, cookieCtx)
 	}
 
 	if len(req.Question) == 0 {
