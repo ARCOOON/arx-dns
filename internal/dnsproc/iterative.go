@@ -36,11 +36,11 @@ type IterativeResolver struct {
 	logger            *slog.Logger
 }
 
-// NewIterativeFromConfig builds an iterative resolver from application configuration.
-func NewIterativeFromConfig(cfg config.Config, stats *telemetry.Stats, logger *slog.Logger) (*IterativeResolver, error) {
-	hints, err := cfg.NormalizedRootHints()
+// NewIterativeFromConfig builds an iterative resolver using dynamically loaded root hints.
+func NewIterativeFromConfig(cfg config.Config, rootHints []string, stats *telemetry.Stats, logger *slog.Logger) (*IterativeResolver, error) {
+	hints, err := NormalizeUpstreams(rootHints)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("root hints: %w", err)
 	}
 	r := NewIterativeResolver(hints, stats, logger)
 	r.dnssecValidation = cfg.Security.DNSSECValidation
