@@ -44,7 +44,7 @@
   - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` responses with SOA-derived TTL (Phase 19).
   - [x] Lockless cache eviction strategies (LRU or LFU) via Ristretto TinyLFU (Phase 08).
-  - [ ] Infrastructure caching (RTT tracking of upstream nameservers for optimal path selection).
+  - [x] Infrastructure caching (RTT tracking): EWMA-smoothed per-IP RTT registry with failure penalties, stale-entry sweep, fastest-first upstream/root-hint selection in forwarder and iterative resolver, and `rtt_tracked_ips` telemetry (Phase 31).
 
 ## 4. Encrypted DNS & Security
 
@@ -95,7 +95,7 @@
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, NOTIFY sent/failed counters, and QNAME minimization fallback counter (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, NOTIFY sent/failed counters, QNAME minimization fallback counter, and RTT registry size (`rtt_tracked_ips`) (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
 - [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.

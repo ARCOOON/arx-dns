@@ -361,6 +361,8 @@ dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 
 When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server resolves it recursively using the configured `[resolver]` mode. In **`forward`** mode (default), queries are sent to `recursive.upstreams` sequentially with a 2-second timeout per attempt. In **`iterative`** mode, arx-dns walks the DNS delegation tree from `resolver.root_hints` with **RD=0**, following NS referrals, using glue records from the Additional section when present, and performing sub-queries to resolve nameserver hostnames when glue is absent. When `resolver.qname_minimization` is enabled (default), outbound delegation queries use progressively unmasked QNAMEs with QTYPE `NS` per RFC 7816 so root and TLD servers never see the full client QNAME. If a minimized query receives `SERVFAIL`, `REFUSED`, or times out, the resolver automatically retries with the full QNAME and original QTYPE; each fallback increments `qname_min_fallbacks` (`arxdns_qname_min_fallbacks_total` in Prometheus). A strict depth limit (15 iterations) prevents infinite referral loops; exceeded depth returns `SERVFAIL`.
 
+Both forward and iterative modes track per-upstream IP round-trip time (RTT) in an in-memory registry (`internal/dnsproc/rtt.go`). Each UDP/TCP exchange records elapsed time using an EWMA smoother; timeouts, connection errors, and `SERVFAIL` responses apply a 2000 ms penalty sample. Before each outbound exchange, candidate nameserver addresses (configured upstreams, root hints, glue, or resolved NS targets) are sorted fastest-first. Untracked IPs start at 500 ms. Stale entries are swept after one hour of inactivity. The live registry size is exposed as `rtt_tracked_ips` (`arxdns_rtt_tracked_ips` Prometheus gauge).
+
 Both modes share the same in-memory response cache keyed by question name, type, class, and EDNS Client Subnet scope when present (see **EDNS Client Subnet** below). On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately. On a cache miss, the resolver performs the lookup, stores the result, and returns it to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. Resolution failures return `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
 When `security.dnssec_validation` is enabled (default), recursive queries include the EDNS **DO (DNSSEC OK)** bit so authoritative servers return `RRSIG` records alongside signed answers. If the response contains `RRSIG` records, arx-dns fetches the zone `DNSKEY` set and verifies each signature with `github.com/miekg/dns`. Successful validation sets the **AD (Authenticated Data)** bit on the client response. Cryptographic validation failures (BOGUS data) are logged as security warnings, counted in `dnssec_validations_failed`, and answered with `SERVFAIL` without caching the payload.
@@ -471,6 +473,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `cookies_verified`          | Queries with a valid Client + Server Cookie pair                        |
 | `cookies_rejected`          | Queries rejected with BADCOOKIE due to an invalid Server Cookie         |
 | `ecs_queries_forwarded`     | Recursive queries forwarded upstream with an EDNS Client Subnet option  |
+| `rtt_tracked_ips`           | Current number of upstream nameserver IPs in the RTT registry           |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`). The same counters are exported in Prometheus text format at `GET /metrics` (no authentication required).
 
@@ -506,6 +509,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `arxdns_cookies_verified_total`          | Queries with a valid DNS Cookie pair                |
 | `arxdns_cookies_rejected_total`          | Queries rejected with BADCOOKIE (invalid cookie)    |
 | `arxdns_ecs_queries_forwarded_total`     | Recursive queries forwarded with ECS option         |
+| `arxdns_rtt_tracked_ips`                 | Current upstream IPs tracked in the RTT registry    |
 
 Example Prometheus scrape config:
 
