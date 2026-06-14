@@ -126,6 +126,7 @@ Example `config.toml` (generated automatically on first run):
 listen = '0.0.0.0'
 port = 53
 event_loops = 0
+log_level = 'INFO'
 
 [zones]
 directory = './zones'
@@ -186,6 +187,7 @@ tls_key = './certs/api.key'
 | `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                          |
 | `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                      |
 | `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                         |
+| `server.log_level`               | `INFO`                                        | Log verbosity: `DEBUG`, `INFO`, `WARN`, or `ERROR` (JSON output to stdout)                     |
 | `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH                  |
 | `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH                 |
 | `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                         |
@@ -428,6 +430,12 @@ dig @127.0.0.1 +norecurse secret.internal.zone A   # NXDOMAIN for untrusted clie
 ```
 
 Graceful shutdown is triggered by `SIGINT` or `SIGTERM`. Final operational counters are logged as JSON on exit.
+
+### Structured logging
+
+All runtime logs are emitted as JSON to stdout via `log/slog`. Set `server.log_level` to `DEBUG`, `INFO`, `WARN`, or `ERROR` (default `INFO`). The level is enforced through a global `slog.LevelVar` initialized in `internal/logger`.
+
+At `DEBUG`, the forwarder, iterative resolver, and response cache emit structured traces for upstream exchanges (server IP, QNAME, latency), delegation-walk steps, cache hits/misses (including remaining TTL), and QNAME minimization fallbacks (logged at `WARN` with the triggering server and reason).
 
 ### Encrypted DNS (DoT & DoH)
 
