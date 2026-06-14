@@ -25,6 +25,7 @@ type Forwarder struct {
 	upstreams        []string
 	client           *mdns.Client
 	stats            *telemetry.Stats
+	rtt              *RTTRegistry
 	dnssecValidation bool
 	ecsEnabled       bool
 	ecsIPv4PrefixLen uint8
@@ -56,6 +57,7 @@ func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
 			Timeout: defaultUpstreamTimeout,
 		},
 		stats: stats,
+		rtt:   DefaultRTTRegistry(stats),
 	}
 }
 
@@ -117,13 +119,33 @@ func (f *Forwarder) Exchange(req *mdns.Msg, client netip.Addr) (*mdns.Msg, error
 
 	upstreamReq, ecsForwarded := f.prepareUpstreamRequest(req, client)
 
-	for _, upstream := range f.upstreams {
+	for _, upstream := range f.rtt.SortServers(f.upstreams) {
+		ip, hasIP := serverIP(upstream)
+		start := time.Now()
 		resp, _, err := f.client.Exchange(upstreamReq, upstream)
+		elapsed := time.Since(start)
+
 		if err != nil {
+			if hasIP {
+				f.rtt.RecordFailure(ip)
+			}
 			continue
 		}
 		if resp == nil {
+			if hasIP {
+				f.rtt.RecordFailure(ip)
+			}
 			continue
+		}
+		if resp.Rcode == mdns.RcodeServerFailure {
+			if hasIP {
+				f.rtt.RecordFailure(ip)
+			}
+			continue
+		}
+
+		if hasIP {
+			f.rtt.RecordSuccess(ip, elapsed)
 		}
 
 		if f.stats != nil {

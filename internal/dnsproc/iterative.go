@@ -1,10 +1,8 @@
 package dnsproc
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/netip"
 	"strings"
@@ -30,6 +28,7 @@ type IterativeResolver struct {
 	rootHints         []string
 	client            *mdns.Client
 	stats             *telemetry.Stats
+	rtt               *RTTRegistry
 	dnssecValidation  bool
 	qnameMinimization bool
 	maxDepth          int
@@ -59,6 +58,7 @@ func NewIterativeResolver(rootHints []string, stats *telemetry.Stats) *Iterative
 			Timeout: defaultIterativeTimeout,
 		},
 		stats:    stats,
+		rtt:      DefaultRTTRegistry(stats),
 		maxDepth: maxIterativeDepth,
 	}
 }
@@ -145,6 +145,7 @@ func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers [
 				return nil, err
 			}
 		}
+		next = r.sortServers(next)
 
 		nextMinLabels := minLabels
 		if minimized {
@@ -224,16 +225,38 @@ func (r *IterativeResolver) buildQuery(name string, qtype, qclass uint16) *mdns.
 
 func (r *IterativeResolver) queryServers(req *mdns.Msg, servers []string) (*mdns.Msg, error) {
 	var lastErr error
-	for _, server := range servers {
+	for _, server := range r.sortServers(servers) {
+		ip, hasIP := serverIP(server)
+		start := time.Now()
 		resp, _, err := r.client.Exchange(req, server)
+		elapsed := time.Since(start)
+
 		if err != nil {
+			if hasIP {
+				r.rtt.RecordFailure(ip)
+			}
 			lastErr = err
 			continue
 		}
-		if resp != nil {
-			return resp, nil
+		if resp == nil {
+			if hasIP {
+				r.rtt.RecordFailure(ip)
+			}
+			lastErr = errors.New("empty response from nameserver")
+			continue
 		}
-		lastErr = errors.New("empty response from nameserver")
+		if resp.Rcode == mdns.RcodeServerFailure {
+			if hasIP {
+				r.rtt.RecordFailure(ip)
+			}
+			lastErr = fmt.Errorf("nameserver %s returned SERVFAIL", server)
+			continue
+		}
+
+		if hasIP {
+			r.rtt.RecordSuccess(ip, elapsed)
+		}
+		return resp, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("all nameserver queries failed")
@@ -242,14 +265,16 @@ func (r *IterativeResolver) queryServers(req *mdns.Msg, servers []string) (*mdns
 }
 
 func (r *IterativeResolver) pickRoot() []string {
-	if len(r.rootHints) == 1 {
-		return []string{r.rootHints[0]}
+	return r.sortServers(r.rootHints)
+}
+
+func (r *IterativeResolver) sortServers(servers []string) []string {
+	if r == nil || r.rtt == nil || len(servers) <= 1 {
+		out := make([]string, len(servers))
+		copy(out, servers)
+		return out
 	}
-	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(r.rootHints))))
-	if err != nil {
-		return []string{r.rootHints[0]}
-	}
-	return []string{r.rootHints[idx.Int64()]}
+	return r.rtt.SortServers(servers)
 }
 
 func (r *IterativeResolver) responseMatchesQuery(resp *mdns.Msg, qname string, qtype uint16) (*mdns.Msg, bool) {
