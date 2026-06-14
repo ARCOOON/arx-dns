@@ -35,6 +35,7 @@
 - [ ] **Recursive / Resolver Mode:**
   - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
   - [x] TTL-aware in-memory cache for forwarded upstream responses with hit/miss telemetry (Phase 08).
+  - [x] ECS-aware cache keys for forwarded upstream responses (Phase 23).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` forwarded responses (Phase 19).
   - [ ] Full iterative resolution starting from root servers (`named.root`).
   - [ ] QNAME Minimization (RFC 7816) for enhanced privacy.
@@ -59,7 +60,7 @@
 
 - [x] **Split-Horizon DNS:** Delivery of distinct zone views based on source IP ACLs (Internal vs. External) (Phase 09).
 - [ ] **GeoDNS / Topology Routing:** Location-based response resolution using GeoIP databases.
-- [ ] **EDNS Client Subnet (ECS - RFC 7871):** Forwarding and processing of client subnets during recursive queries for optimized CDN routing.
+- [x] **EDNS Client Subnet (ECS - RFC 7871):** Forwarding and processing of client subnets during recursive queries for optimized CDN routing (Phase 23).
 - [ ] **Health Checking & Failover Engine:** Active probing of backend IPs (Ping, TCP, HTTP/HTTPS) with dynamic record adjustments when endpoints fail.
 - [ ] **Load Balancing Policies:** Implementation of Round-Robin, Weighted Round-Robin, and Random selection algorithms.
 - [ ] **Anycast Readiness:** Completely stateless UDP processing design to ensure stability behind BGP Anycast routing.
@@ -87,13 +88,13 @@
 
 ## 8. Management, Automation & Observability
 
-- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22).
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; `[ecs]` section for EDNS Client Subnet forwarding; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22, Phase 23).
 - [~] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, and DNS Cookie verified/rejected counters (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, and ECS-forwarded query counter (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
 - [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.

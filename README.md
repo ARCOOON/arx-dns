@@ -123,6 +123,11 @@ enabled = true
 requests_per_second = 100
 burst = 200
 
+[ecs]
+enabled = false
+ipv4_prefix_length = 24
+ipv6_prefix_length = 56
+
 [tls]
 cert_file = './certs/server.crt'
 key_file = './certs/server.key'
@@ -162,6 +167,9 @@ tls_key = './certs/api.key'
 | `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                            |
 | `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                        |
 | `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                          |
+| `ecs.enabled`                    | `false`                                       | Append EDNS Client Subnet (RFC 7871) to upstream recursive queries                           |
+| `ecs.ipv4_prefix_length`         | `24`                                          | IPv4 prefix length sent in ECS options (0–32)                                                |
+| `ecs.ipv6_prefix_length`         | `56`                                          | IPv6 prefix length sent in ECS options (0–128)                                               |
 
 Example:
 
@@ -243,7 +251,7 @@ dig @127.0.0.1 +short ads.example.com A    # NXDOMAIN (default)
 dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 ```
 
-When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`recursive.upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, and class. On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache, then returned to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
+When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`recursive.upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, class, and EDNS Client Subnet scope when present (see **EDNS Client Subnet** below). On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache, then returned to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
 
 When `security.dnssec_validation` is enabled (default), upstream requests include the EDNS **DO (DNSSEC OK)** bit so resolvers return `RRSIG` records alongside signed answers. If the response contains `RRSIG` records, arx-dns fetches the zone `DNSKEY` set from upstream and verifies each signature with `github.com/miekg/dns`. Successful validation sets the **AD (Authenticated Data)** bit on the client response. Cryptographic validation failures (BOGUS data) are logged as security warnings, counted in `dnssec_validations_failed`, and answered with `SERVFAIL` without caching the upstream payload.
 
@@ -256,6 +264,18 @@ When `rate_limit.enabled` is true (default), every inbound DNS query is checked 
 | `rate_limit.enabled`             | `true`  | Enable or disable RRL                                  |
 | `rate_limit.requests_per_second` | `100`   | Token bucket refill rate per client IP                 |
 | `rate_limit.burst`               | `200`   | Maximum burst per client IP before excess queries drop |
+
+### EDNS Client Subnet (RFC 7871)
+
+When `ecs.enabled` is `true`, arx-dns appends an EDNS0 Client Subnet option (`0x0008`) to upstream recursive queries so CDN-aware resolvers can return geographically optimized answers. The client IP is masked to the configured prefix length (`ecs.ipv4_prefix_length` default `/24`, `ecs.ipv6_prefix_length` default `/56`) with host bits zeroed per RFC 7871.
+
+| Behavior                       | Description                                                               |
+| ------------------------------ | ------------------------------------------------------------------------- |
+| Incoming query already has ECS | Existing Client Subnet option is preserved and forwarded unchanged        |
+| ECS disabled (default)         | Upstream queries are forwarded without adding ECS                         |
+| Response cache                 | Cache keys include ECS scope so CDN-specific answers are not cross-served |
+
+Forwarded queries that include an ECS option (client-supplied or generated) increment `ecs_queries_forwarded` (`arxdns_ecs_queries_forwarded_total` in Prometheus).
 
 For `A` and `AAAA` queries, the processor follows CNAME chains automatically: each alias is appended to the Answer section and the target name is looked up for the originally requested type. Chains are limited to 8 hops with visited-name loop detection; loops or excessive depth return `SERVFAIL`. Direct `CNAME` queries return only the alias record without following the chain. All lookups read the active radix tree via `sync/atomic.Value` without locks.
 
@@ -340,6 +360,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `rrl_dropped`               | Queries silently dropped by per-client-IP response rate limiting        |
 | `cookies_verified`          | Queries with a valid Client + Server Cookie pair                        |
 | `cookies_rejected`          | Queries rejected with BADCOOKIE due to an invalid Server Cookie         |
+| `ecs_queries_forwarded`     | Recursive queries forwarded upstream with an EDNS Client Subnet option  |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`). The same counters are exported in Prometheus text format at `GET /metrics` (no authentication required).
 
@@ -374,6 +395,7 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `arxdns_rrl_dropped_total`               | Queries silently dropped by response rate limiting  |
 | `arxdns_cookies_verified_total`          | Queries with a valid DNS Cookie pair                |
 | `arxdns_cookies_rejected_total`          | Queries rejected with BADCOOKIE (invalid cookie)    |
+| `arxdns_ecs_queries_forwarded_total`     | Recursive queries forwarded with ECS option         |
 
 Example Prometheus scrape config:
 
