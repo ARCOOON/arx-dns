@@ -47,6 +47,17 @@ npm run dev    # Vite dev server (default http://127.0.0.1:5173)
 
 Stack: Vue 3, TypeScript, Vite, Tailwind CSS v4, shadcn-vue (radix-vue primitives), OKLCH theme tokens, Noto Sans headings, Source Sans 3 body text. Add components with `npx shadcn-vue@latest add <component>`.
 
+During `npm run dev`, Vite proxies `/api` to `http://127.0.0.1:8080` so the WebUI can call the management API without CORS issues. Store the API bearer token in `localStorage` under the key `arx_token` (the login screen sets this automatically).
+
+```bash
+# Terminal 1: start arx-dns with API on :8080
+./arx-dns
+
+# Terminal 2: start the WebUI dev server
+cd ui && npm run dev
+# Open http://127.0.0.1:5173 and sign in with your [api].token value
+```
+
 ## Docker Deployment
 
 Production images use a multi-stage build (`CGO_ENABLED=0`, statically linked binary) and a `scratch` runtime stage for minimal memory footprint. Configuration, zones, and blocklists are mounted from the host at runtime.
