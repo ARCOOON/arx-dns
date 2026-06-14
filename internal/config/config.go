@@ -26,6 +26,14 @@ type Config struct {
 	Firewall  FirewallConfig  `toml:"firewall"`
 	Security  SecurityConfig  `toml:"security"`
 	RateLimit RateLimitConfig `toml:"rate_limit"`
+	ECS       ECSConfig       `toml:"ecs"`
+}
+
+// ECSConfig controls EDNS Client Subnet (RFC 7871) forwarding to upstream resolvers.
+type ECSConfig struct {
+	Enabled          bool `toml:"enabled"`
+	IPv4PrefixLength int  `toml:"ipv4_prefix_length"`
+	IPv6PrefixLength int  `toml:"ipv6_prefix_length"`
 }
 
 // RateLimitConfig controls per-client-IP response rate limiting (RRL).
@@ -100,6 +108,8 @@ const (
 	defaultAPIAuthToken      = "dev-token-change-me"
 	defaultRateLimitRPS      = 100
 	defaultRateLimitBurst    = 200
+	defaultECSIPv4PrefixLen  = 24
+	defaultECSIPv6PrefixLen  = 56
 )
 
 // Default returns a Config populated with the same defaults as the legacy CLI flags.
@@ -144,6 +154,11 @@ func Default() Config {
 			Enabled:           true,
 			RequestsPerSecond: defaultRateLimitRPS,
 			Burst:             defaultRateLimitBurst,
+		},
+		ECS: ECSConfig{
+			Enabled:          false,
+			IPv4PrefixLength: defaultECSIPv4PrefixLen,
+			IPv6PrefixLength: defaultECSIPv6PrefixLen,
 		},
 	}
 }
@@ -250,6 +265,12 @@ func (c *Config) applyDefaults() {
 	if c.RateLimit.Burst == 0 {
 		c.RateLimit.Burst = def.RateLimit.Burst
 	}
+	if c.ECS.IPv4PrefixLength == 0 {
+		c.ECS.IPv4PrefixLength = def.ECS.IPv4PrefixLength
+	}
+	if c.ECS.IPv6PrefixLength == 0 {
+		c.ECS.IPv6PrefixLength = def.ECS.IPv6PrefixLength
+	}
 }
 
 // Validate checks that all configuration fields are usable at runtime.
@@ -287,7 +308,20 @@ func (c Config) Validate() error {
 	if err := c.validateSecurity(); err != nil {
 		return err
 	}
+	if err := c.validateECS(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (c Config) validateECS() error {
+	if c.ECS.IPv4PrefixLength < 0 || c.ECS.IPv4PrefixLength > 32 {
+		return fmt.Errorf("ecs.ipv4_prefix_length must be between 0 and 32, got %d", c.ECS.IPv4PrefixLength)
+	}
+	if c.ECS.IPv6PrefixLength < 0 || c.ECS.IPv6PrefixLength > 128 {
+		return fmt.Errorf("ecs.ipv6_prefix_length must be between 0 and 128, got %d", c.ECS.IPv6PrefixLength)
+	}
 	return nil
 }
 
