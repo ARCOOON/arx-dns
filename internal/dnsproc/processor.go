@@ -1,6 +1,7 @@
 package dnsproc
 
 import (
+	"encoding/hex"
 	"log/slog"
 	"net"
 	"net/netip"
@@ -16,7 +17,15 @@ const (
 	maxMessageSize     = 65535
 	dnsHeaderSize      = 12
 	maxCNAMEChainDepth = 8
+	clientCookieLen    = 8
+	serverCookieLen    = 8
 )
+
+// CookieHandler generates and verifies RFC 7873 server cookies.
+type CookieHandler interface {
+	ServerCookie(client netip.Addr, clientCookie [8]byte, dst []byte)
+	Verify(client netip.Addr, clientCookie [8]byte, serverCookie []byte) bool
+}
 
 // Processor resolves authoritative DNS queries against an in-memory zone store and
 // forwards unresolved recursive queries to upstream resolvers when configured.
@@ -29,11 +38,12 @@ type Processor struct {
 	firewall         *firewall.Engine
 	dnssecValidation bool
 	validator        *DNSSECValidator
+	cookies          CookieHandler
 	logger           *slog.Logger
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, logger *slog.Logger) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, logger *slog.Logger) *Processor {
 	p := &Processor{
 		store:            store,
 		forwarder:        forwarder,
@@ -42,6 +52,7 @@ func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCac
 		acl:              acl,
 		firewall:         fw,
 		dnssecValidation: dnssecValidation,
+		cookies:          cookies,
 		logger:           logger,
 	}
 	if dnssecValidation && forwarder != nil {
@@ -70,30 +81,35 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 		return nil, err
 	}
 
+	cookieCtx := p.parseRequestCookie(req, client)
+	if cookieCtx.rejectBadCookie {
+		return p.badCookieResponse(req, client, cookieCtx, limitUDP)
+	}
+
 	if len(req.Question) == 0 {
 		resp := new(mdns.Msg)
 		resp.SetReply(req)
 		resp.RecursionAvailable = true
 		resp.Authoritative = true
 		resp.Rcode = mdns.RcodeFormatError
-		return p.packResponse(resp, req, limitUDP)
+		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 	}
 
 	trusted := p.clientTrusted(client)
 	q := req.Question[0]
 
 	if p.firewall != nil && p.firewall.Blocked(q.Name) {
-		return p.blockedResponse(req, q, limitUDP)
+		return p.blockedResponse(req, q, limitUDP, client, cookieCtx)
 	}
 
 	records, rcode, needsForward := p.resolveQuestion(q, trusted)
 
 	if needsForward && req.RecursionDesired {
 		if !trusted {
-			return p.refusedResponse(req, limitUDP)
+			return p.refusedResponse(req, limitUDP, client, cookieCtx)
 		}
 		if p.forwarder != nil {
-			return p.forwardQuery(req, limitUDP)
+			return p.forwardQuery(req, client, limitUDP, cookieCtx)
 		}
 	}
 
@@ -103,7 +119,7 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 	resp.RecursionAvailable = true
 	resp.Rcode = rcode
 	resp.Answer = records
-	return p.packResponse(resp, req, limitUDP)
+	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
 func (p *Processor) clientTrusted(client netip.Addr) bool {
@@ -113,7 +129,7 @@ func (p *Processor) clientTrusted(client netip.Addr) bool {
 	return p.acl.Trusted(client)
 }
 
-func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP bool) ([]byte, error) {
+func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
 	if p.stats != nil {
 		p.stats.IncFirewallBlocked()
 	}
@@ -155,10 +171,10 @@ func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP boo
 		resp.Rcode = mdns.RcodeNameError
 	}
 
-	return p.packResponse(resp, req, limitUDP)
+	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
-func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool) ([]byte, error) {
+func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
 	if p.stats != nil {
 		p.stats.IncACLRejected()
 	}
@@ -168,10 +184,10 @@ func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool) ([]byte, error
 	resp.RecursionAvailable = true
 	resp.Authoritative = false
 	resp.Rcode = mdns.RcodeRefused
-	return p.packResponse(resp, req, limitUDP)
+	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
-func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
+func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool, cookieCtx cookieContext) ([]byte, error) {
 	key := storage.QuestionKey(req.Question[0])
 
 	if p.cache != nil {
@@ -184,7 +200,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 			}
 			cached.SetReply(req)
 			cached.RecursionAvailable = true
-			return p.packResponse(cached, req, limitUDP)
+			return p.packResponse(cached, req, limitUDP, client, cookieCtx)
 		}
 		if p.stats != nil {
 			p.stats.IncCacheMiss()
@@ -198,7 +214,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 		fallback.RecursionAvailable = true
 		fallback.Authoritative = false
 		fallback.Rcode = mdns.RcodeServerFailure
-		return p.packResponse(fallback, req, limitUDP)
+		return p.packResponse(fallback, req, limitUDP, client, cookieCtx)
 	}
 
 	if p.dnssecValidation && p.validator != nil {
@@ -220,7 +236,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 			fallback.RecursionAvailable = true
 			fallback.Authoritative = false
 			fallback.Rcode = mdns.RcodeServerFailure
-			return p.packResponse(fallback, req, limitUDP)
+			return p.packResponse(fallback, req, limitUDP, client, cookieCtx)
 		}
 		if authenticated {
 			resp.AuthenticatedData = true
@@ -233,15 +249,114 @@ func (p *Processor) forwardQuery(req *mdns.Msg, limitUDP bool) ([]byte, error) {
 
 	resp.SetReply(req)
 	resp.RecursionAvailable = true
-	return p.packResponse(resp, req, limitUDP)
+	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+}
+
+type cookieContext struct {
+	hasClientCookie bool
+	hasServerCookie bool
+	clientCookie    [clientCookieLen]byte
+	serverCookie    []byte
+	rejectBadCookie bool
+}
+
+func (p *Processor) parseRequestCookie(req *mdns.Msg, client netip.Addr) cookieContext {
+	var ctx cookieContext
+	if p.cookies == nil {
+		return ctx
+	}
+
+	opt := req.IsEdns0()
+	if opt == nil {
+		return ctx
+	}
+
+	for _, option := range opt.Option {
+		cookieOpt, ok := option.(*mdns.EDNS0_COOKIE)
+		if !ok {
+			continue
+		}
+
+		raw, err := hex.DecodeString(cookieOpt.Cookie)
+		if err != nil || len(raw) < clientCookieLen {
+			return ctx
+		}
+
+		copy(ctx.clientCookie[:], raw[:clientCookieLen])
+		ctx.hasClientCookie = true
+		if len(raw) > clientCookieLen {
+			ctx.serverCookie = raw[clientCookieLen:]
+			ctx.hasServerCookie = true
+		}
+		break
+	}
+
+	if ctx.hasClientCookie && ctx.hasServerCookie {
+		if p.cookies.Verify(client, ctx.clientCookie, ctx.serverCookie) {
+			if p.stats != nil {
+				p.stats.IncCookiesVerified()
+			}
+		} else {
+			ctx.rejectBadCookie = true
+			if p.stats != nil {
+				p.stats.IncCookiesRejected()
+			}
+		}
+	}
+
+	return ctx
+}
+
+func (p *Processor) attachResponseCookie(resp *mdns.Msg, client netip.Addr, cookieCtx cookieContext) {
+	if p.cookies == nil || !cookieCtx.hasClientCookie {
+		return
+	}
+
+	opt := resp.IsEdns0()
+	if opt == nil {
+		return
+	}
+
+	var serverCookie [serverCookieLen]byte
+	p.cookies.ServerCookie(client, cookieCtx.clientCookie, serverCookie[:])
+
+	cookieData := make([]byte, clientCookieLen+serverCookieLen)
+	copy(cookieData[:clientCookieLen], cookieCtx.clientCookie[:])
+	copy(cookieData[clientCookieLen:], serverCookie[:])
+
+	filtered := opt.Option[:0]
+	for _, option := range opt.Option {
+		if _, isCookie := option.(*mdns.EDNS0_COOKIE); isCookie {
+			continue
+		}
+		filtered = append(filtered, option)
+	}
+	filtered = append(filtered, &mdns.EDNS0_COOKIE{
+		Code:   mdns.EDNS0COOKIE,
+		Cookie: hex.EncodeToString(cookieData),
+	})
+	opt.Option = filtered
+}
+
+func (p *Processor) badCookieResponse(req *mdns.Msg, client netip.Addr, cookieCtx cookieContext, limitUDP bool) ([]byte, error) {
+	resp := new(mdns.Msg)
+	resp.SetReply(req)
+	resp.RecursionAvailable = true
+	resp.Authoritative = false
+	resp.SetRcode(req, mdns.RcodeBadCookie)
+	resp.Answer = nil
+	resp.Ns = nil
+	resp.Extra = nil
+	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
 // packResponse appends an EDNS0 OPT record when the request carried one, truncates UDP
 // responses to the negotiated payload size (512 bytes when EDNS0 is absent), and sets TC
 // when records are omitted.
-func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool) ([]byte, error) {
+func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
 	if opt := req.IsEdns0(); opt != nil {
 		resp.SetEdns0(opt.UDPSize(), opt.Do())
+		p.attachResponseCookie(resp, client, cookieCtx)
 	}
 
 	if limitUDP {
