@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ARCOOON/arx-dns/internal/config"
+	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
@@ -19,15 +20,16 @@ const shutdownTimeout = 10 * time.Second
 
 // Server exposes a lightweight HTTP API for health checks, telemetry, and zone management.
 type Server struct {
-	cfg    config.Config
-	stats  *telemetry.Stats
-	store  *storage.Memory
-	logger *slog.Logger
-	server *http.Server
+	cfg      config.Config
+	stats    *telemetry.Stats
+	store    *storage.Memory
+	notifier dnsproc.ZoneChangeNotifier
+	logger   *slog.Logger
+	server   *http.Server
 }
 
 // New creates a management API server bound to cfg.API.Listen.
-func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, logger *slog.Logger) *Server {
+func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, notifier dnsproc.ZoneChangeNotifier, logger *slog.Logger) *Server {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -36,10 +38,11 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, logge
 	}
 
 	s := &Server{
-		cfg:    cfg,
-		stats:  stats,
-		store:  store,
-		logger: logger,
+		cfg:      cfg,
+		stats:    stats,
+		store:    store,
+		notifier: notifier,
+		logger:   logger,
 	}
 
 	mux := http.NewServeMux()
@@ -131,6 +134,9 @@ func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleZonesReload(w http.ResponseWriter, _ *http.Request) {
 	s.logger.Info("zone reload triggered", "directory", s.cfg.Zones.Directory, "trigger", "api")
 	storage.LoadZones(s.cfg.Zones, s.store, s.logger)
+	if s.notifier != nil {
+		s.notifier.NotifyZones(dnsproc.ZoneOrigins(s.store.ListZones()))
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"message": "zones reloaded",

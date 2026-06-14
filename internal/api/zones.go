@@ -56,6 +56,9 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hdr := rr.Header()
+	if s.notifier != nil {
+		s.notifier.NotifyZone(zone)
+	}
 	writeJSON(w, http.StatusCreated, recordResponse{
 		Status:  "created",
 		Message: "record added",
@@ -94,6 +97,10 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 		}
 		return
+	}
+
+	if s.notifier != nil {
+		s.notifier.NotifyZone(zone)
 	}
 
 	writeJSON(w, http.StatusOK, recordResponse{
