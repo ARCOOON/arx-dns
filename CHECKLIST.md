@@ -16,7 +16,7 @@
 ## 2. DNS Packet Parsing & Protocol Core
 
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
-- [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, and OPT echo in responses (Phase 10). EDNS options and Path MTU Discovery remain open.
+- [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, and OPT echo in responses (Phase 10). EDNS options beyond DNS Cookies and Path MTU Discovery remain open.
 - [ ] **Comprehensive Record Type Support:** Native processing of:
   - [~] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06; `MX`/`TXT` API CRUD and BIND serialization in Phase 18).
   - [~] Enterprise/Sec: `SRV`, `CAA`, `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16; `SRV` API CRUD and BIND serialization in Phase 18).
@@ -76,7 +76,7 @@
     - [x] Bearer-token management API on `[api]` listener (Phase 15).
     - [x] Optional HTTPS (`api.tls_cert` / `api.tls_key`) for Bearer token protection in transit (Phase 18).
     - [x] Zone URL parameter validation against path traversal (Phase 18).
-- [ ] **DNS Cookies (RFC 7873):** Protection against IP spoofing and cache poisoning attacks.
+- [x] **DNS Cookies (RFC 7873):** HMAC-SHA256 server cookie generation, Client/Server Cookie verification, BADCOOKIE rejection with truncated answers, `[security]` config (`dns_cookies_enabled`, `dns_cookie_secret` auto-generation), and `cookies_verified` / `cookies_rejected` telemetry (Phase 22).
 
 ## 7. Storage Engine & Pluggable Backends
 
@@ -87,13 +87,13 @@
 
 ## 8. Management, Automation & Observability
 
-- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16).
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22).
 - [~] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, and RRL-dropped queries (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, and DNS Cookie verified/rejected counters (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
 - [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.

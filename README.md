@@ -115,6 +115,8 @@ block_action = 'NXDOMAIN'
 
 [security]
 dnssec_validation = true
+dns_cookies_enabled = true
+dns_cookie_secret = ''
 
 [rate_limit]
 enabled = true
@@ -136,28 +138,30 @@ tls_cert = './certs/api.crt'
 tls_key = './certs/api.key'
 ```
 
-| Section / Key                    | Default                                       | Description                                                                                 |
-| -------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                       |
-| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                   |
-| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                      |
-| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH               |
-| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH              |
-| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                      |
-| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                             |
-| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security               |
-| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                          |
-| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`         |
-| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`        |
-| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`) |
-| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                             |
-| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                           |
-| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                     |
-| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                 |
-| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                |
-| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                           |
-| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                       |
-| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                         |
+| Section / Key                    | Default                                       | Description                                                                                  |
+| -------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                        |
+| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                    |
+| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                       |
+| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH                |
+| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH               |
+| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                       |
+| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                              |
+| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security                |
+| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                           |
+| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`          |
+| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`         |
+| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`)  |
+| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                              |
+| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                            |
+| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                      |
+| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                  |
+| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                 |
+| `security.dns_cookies_enabled`   | `true`                                        | Enable RFC 7873 DNS Cookies on EDNS0 OPT records to mitigate spoofing and cache poisoning    |
+| `security.dns_cookie_secret`     | _(auto-generated)_                            | 64-character hex string (32 bytes) HMAC key; generated and persisted on first start if empty |
+| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                            |
+| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                        |
+| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                          |
 
 Example:
 
@@ -182,6 +186,18 @@ Valid incoming DNS queries receive an authoritative answer when the name exists,
 ### EDNS0 (RFC 6891)
 
 When a query includes an OPT pseudo-record in the Additional section, the server echoes EDNS0 support in the response and honors the client's advertised UDP payload size. Values below 512 bytes are treated as 512 per RFC 6891. If the assembled UDP response exceeds the negotiated limit (512 bytes when EDNS0 is absent), the **TC (Truncation)** bit is set and records are omitted until the message fits; clients should retry over TCP. TCP responses are never truncated by UDP size limits but still include an OPT record when the request carried one.
+
+### DNS Cookies (RFC 7873)
+
+When `security.dns_cookies_enabled` is `true` (default), the server processes the EDNS0 Cookie option (`0x0a`):
+
+| Request cookie state         | Server behavior                                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client Cookie only (8 bytes) | Query is processed normally; an 8-byte Server Cookie (HMAC-SHA256 over client IP + Client Cookie + secret) is appended in the response OPT                                |
+| Client + Server Cookie       | Server Cookie is verified before processing; valid pairs increment `cookies_verified`                                                                                     |
+| Invalid Server Cookie        | Query processing stops immediately; extended RCODE **BADCOOKIE** (23) is returned with no answer data and the correct Server Cookie in OPT; increments `cookies_rejected` |
+
+The `dns_cookie_secret` is a 32-byte key stored as a 64-character hex string in `config.toml`. When the config file is first created or the secret is empty, a cryptographically random value is generated and written back to disk. Keep this secret stable across restarts so returning clients retain valid cookies.
 
 ### TCP connection hardening
 
@@ -322,6 +338,8 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `dnssec_validations_passed` | Forwarded upstream responses that passed DNSSEC signature verification  |
 | `dnssec_validations_failed` | Forwarded upstream responses rejected as BOGUS after DNSSEC checks      |
 | `rrl_dropped`               | Queries silently dropped by per-client-IP response rate limiting        |
+| `cookies_verified`          | Queries with a valid Client + Server Cookie pair                        |
+| `cookies_rejected`          | Queries rejected with BADCOOKIE due to an invalid Server Cookie         |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`). The same counters are exported in Prometheus text format at `GET /metrics` (no authentication required).
 
@@ -354,6 +372,8 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `arxdns_dnssec_validations_passed_total` | Forwarded responses that passed DNSSEC verification |
 | `arxdns_dnssec_validations_failed_total` | Forwarded responses rejected as BOGUS               |
 | `arxdns_rrl_dropped_total`               | Queries silently dropped by response rate limiting  |
+| `arxdns_cookies_verified_total`          | Queries with a valid DNS Cookie pair                |
+| `arxdns_cookies_rejected_total`          | Queries rejected with BADCOOKIE (invalid cookie)    |
 
 Example Prometheus scrape config:
 
