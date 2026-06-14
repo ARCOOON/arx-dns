@@ -32,7 +32,7 @@
   - [x] Parsing and validation of standard BIND zone files (Phase 04).
   - [x] fsnotify hot-reload with atomic radix-tree swapping and 500ms debounce (Phase 05).
   - [x] Dynamic Updates (RFC 2136) secured via TSIG.
-  - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
+  - [x] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996) (Phase 28).
 - [ ] **Recursive / Resolver Mode:**
   - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
   - [x] TTL-aware in-memory cache for forwarded upstream responses with hit/miss telemetry (Phase 08).
@@ -73,7 +73,7 @@
   - [x] Flat-file blocklist engine with reversed-domain radix prefix matching, subdomain blocking, `NXDOMAIN` / `ZEROIP` actions, fsnotify hot-reload, and `firewall_blocked` telemetry (Phase 11).
 - [x] **Access Control Lists (ACLs):** Granular definitions for:
   - [x] Authorized recursive clients (`recursive.trusted_subnets`, REFUSED for untrusted RD queries) (Phase 09).
-  - [ ] Authorized zone transfer (AXFR/IXFR) peers.
+  - [x] Authorized zone transfer (AXFR/IXFR) peers (`xfr.allowed_subnets`, REFUSED for unauthorized TCP transfers; UDP AXFR/IXFR refused) (Phase 28).
   - [x] Management/API access.
     - [x] Bearer-token management API on `[api]` listener (Phase 15).
     - [x] Optional HTTPS (`api.tls_cert` / `api.tls_key`) for Bearer token protection in transit (Phase 18).
@@ -89,13 +89,13 @@
 
 ## 8. Management, Automation & Observability
 
-- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; `[ecs]` section for EDNS Client Subnet forwarding; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22, Phase 23).
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; `[ecs]` section for EDNS Client Subnet forwarding; `[xfr]` section for zone transfer ACLs and NOTIFY slaves; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22, Phase 23, Phase 28).
 - [~] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
-- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, and ECS-forwarded query counter (JSON-serializable snapshot for future API).
+- [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, and NOTIFY sent/failed counters (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
 - [x] **Zone & Record Management API (Phase 17):** Authenticated `GET /api/v1/zones`, `POST /api/v1/zones/{zone}/records`, and `DELETE /api/v1/zones/{zone}/records`; atomic radix-tree swap on mutation; BIND `.zone` file rewrite via `internal/storage` writer with atomic rename.
 - [x] **API Security Hardening (Phase 18):** Optional `[api]` TLS (`tls_cert`, `tls_key`); strict `{zone}` FQDN validation; structured `slog` audit trail for all `POST` and `DELETE` requests.

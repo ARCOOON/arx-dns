@@ -131,6 +131,11 @@ ipv6_prefix_length = 56
 [update]
 keys = { "update-key." = "c2VjcmV0LWtleS1mb3ItdGVzdGluZyE=" }
 
+[xfr]
+enabled = false
+allowed_subnets = ['10.0.0.0/8', '192.168.0.0/16']
+notify_slaves = ['192.168.1.10', '192.168.1.11']
+
 [tls]
 cert_file = './certs/server.crt'
 key_file = './certs/server.key'
@@ -174,6 +179,9 @@ tls_key = './certs/api.key'
 | `ecs.ipv4_prefix_length`         | `24`                                          | IPv4 prefix length sent in ECS options (0–32)                                                 |
 | `ecs.ipv6_prefix_length`         | `56`                                          | IPv6 prefix length sent in ECS options (0–128)                                                |
 | `update.keys`                    | _(empty)_                                     | Map of TSIG key names (canonical FQDN) to base64-encoded secrets for RFC 2136 dynamic updates |
+| `xfr.enabled`                    | `false`                                       | Enable AXFR/IXFR zone transfers over TCP and NOTIFY broadcasts to slaves                      |
+| `xfr.allowed_subnets`            | _(empty)_                                     | CIDR prefixes authorized to request zone transfers (AXFR/IXFR); empty denies all peers        |
+| `xfr.notify_slaves`              | _(empty)_                                     | Slave nameserver IP addresses (or `host:port`) to receive NOTIFY on zone changes              |
 
 Example:
 
@@ -290,7 +298,27 @@ send
 EOF
 ```
 
-Responses are signed with the same TSIG key. SOA records cannot be modified via dynamic update.
+Responses are signed with the same TSIG key. SOA records cannot be modified via dynamic update. Successful updates trigger RFC 1996 NOTIFY to configured slaves when `[xfr]` is enabled.
+
+### Zone transfers (AXFR/IXFR) and NOTIFY
+
+When `xfr.enabled = true`, authorized slaves may replicate zones over **TCP** using AXFR (QTYPE 252) or IXFR (QTYPE 251). UDP AXFR/IXFR requests receive **REFUSED**.
+
+| Config key            | Description                                                                   |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `xfr.enabled`         | Master role: serve zone transfers and send NOTIFY on changes                  |
+| `xfr.allowed_subnets` | CIDR list of peers permitted to request AXFR/IXFR; others receive **REFUSED** |
+| `xfr.notify_slaves`   | Slave IP addresses notified after API, dynamic update, or fsnotify reload     |
+
+AXFR streams the zone as multiple TCP messages per RFC 5936: an opening SOA, all other records in batches, and a closing SOA with identical content. IXFR requests are downgraded to a full AXFR (RFC 1995 compliant fallback without a transaction journal).
+
+NOTIFY (opcode 4) is sent asynchronously to each `notify_slaves` entry with QNAME set to the zone apex and QTYPE SOA whenever:
+
+- A zone file is hot-reloaded via `fsnotify`
+- The management API reloads zones or mutates records
+- A TSIG-signed dynamic update succeeds
+
+The TCP reactor extends per-connection deadlines to **5 minutes** during active zone transfers to avoid premature timeout on large zones.
 
 ### Access control (ACL)
 
