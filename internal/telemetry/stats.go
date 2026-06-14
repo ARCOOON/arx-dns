@@ -38,6 +38,7 @@ type Stats struct {
 	notifySent              atomic.Uint64
 	notifyFailed            atomic.Uint64
 	qnameMinFallbacks       atomic.Uint64
+	rttTrackedIPs           atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -78,6 +79,7 @@ type Snapshot struct {
 	NotifySent              uint64 `json:"notify_sent"`
 	NotifyFailed            uint64 `json:"notify_failed"`
 	QNameMinFallbacks       uint64 `json:"qname_min_fallbacks"`
+	RTTTrackedIPs           uint64 `json:"rtt_tracked_ips"`
 }
 
 // Snapshot returns the current counter values.
@@ -114,6 +116,7 @@ func (s *Stats) Snapshot() Snapshot {
 		NotifySent:              s.notifySent.Load(),
 		NotifyFailed:            s.notifyFailed.Load(),
 		QNameMinFallbacks:       s.qnameMinFallbacks.Load(),
+		RTTTrackedIPs:           s.rttTrackedIPs.Load(),
 	}
 }
 
@@ -250,4 +253,9 @@ func (s *Stats) IncNotifyFailed() {
 
 func (s *Stats) IncQNameMinFallback() {
 	s.qnameMinFallbacks.Add(1)
+}
+
+// SetRTTTrackedIPs stores the current number of IPs in the RTT registry.
+func (s *Stats) SetRTTTrackedIPs(count uint64) {
+	s.rttTrackedIPs.Store(count)
 }

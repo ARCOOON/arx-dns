@@ -17,9 +17,10 @@ type counterSpec struct {
 
 // StatsCollector exposes lock-free Stats counters to Prometheus on scrape.
 type StatsCollector struct {
-	stats *Stats
-	descs map[string]*prometheus.Desc
-	specs []counterSpec
+	stats      *Stats
+	descs      map[string]*prometheus.Desc
+	specs      []counterSpec
+	gaugeSpecs []counterSpec
 }
 
 // NewStatsCollector returns a Prometheus collector that reads atomic counters
@@ -63,8 +64,20 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "qname_min_fallbacks_total", help: "Total number of iterative queries that fell back from QNAME minimization to the full QNAME.", load: func(s Snapshot) float64 { return float64(s.QNameMinFallbacks) }},
 	}
 
-	descs := make(map[string]*prometheus.Desc, len(specs))
+	gaugeSpecs := []counterSpec{
+		{name: "rtt_tracked_ips", help: "Current number of upstream nameserver IPs tracked in the RTT registry.", load: func(s Snapshot) float64 { return float64(s.RTTTrackedIPs) }},
+	}
+
+	descs := make(map[string]*prometheus.Desc, len(specs)+len(gaugeSpecs))
 	for _, spec := range specs {
+		descs[spec.name] = prometheus.NewDesc(
+			prometheus.BuildFQName(metricsNamespace, "", spec.name),
+			spec.help,
+			nil,
+			nil,
+		)
+	}
+	for _, spec := range gaugeSpecs {
 		descs[spec.name] = prometheus.NewDesc(
 			prometheus.BuildFQName(metricsNamespace, "", spec.name),
 			spec.help,
@@ -74,15 +87,19 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 	}
 
 	return &StatsCollector{
-		stats: stats,
-		descs: descs,
-		specs: specs,
+		stats:      stats,
+		descs:      descs,
+		specs:      specs,
+		gaugeSpecs: gaugeSpecs,
 	}
 }
 
 // Describe implements prometheus.Collector.
 func (c *StatsCollector) Describe(ch chan<- *prometheus.Desc) {
 	for _, spec := range c.specs {
+		ch <- c.descs[spec.name]
+	}
+	for _, spec := range c.gaugeSpecs {
 		ch <- c.descs[spec.name]
 	}
 }
@@ -95,6 +112,13 @@ func (c *StatsCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(
 			c.descs[spec.name],
 			prometheus.CounterValue,
+			spec.load(snap),
+		)
+	}
+	for _, spec := range c.gaugeSpecs {
+		ch <- prometheus.MustNewConstMetric(
+			c.descs[spec.name],
+			prometheus.GaugeValue,
 			spec.load(snap),
 		)
 	}
