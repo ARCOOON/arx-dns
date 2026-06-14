@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"strings"
 
 	mdns "github.com/miekg/dns"
 
@@ -119,6 +120,9 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 	resp.RecursionAvailable = true
 	resp.Rcode = rcode
 	resp.Answer = records
+	if q.Qtype == mdns.TypeANY && rcode == mdns.RcodeSuccess {
+		resp.Truncated = true
+	}
 	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
@@ -382,6 +386,8 @@ func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []md
 	case mdns.TypeA, mdns.TypeAAAA:
 		records, rcode = p.resolveAddress(q.Name, q.Qtype, trusted)
 		needsForward = rcode == mdns.RcodeNameError
+	case mdns.TypeANY:
+		records, rcode, needsForward = p.resolveANY(q.Name, trusted)
 	default:
 		var status storage.LookupStatus
 		records, status = p.authoritativeLookup(q.Name, q.Qtype, trusted)
@@ -396,6 +402,58 @@ func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []md
 		}
 	}
 	return records, rcode, needsForward
+}
+
+// resolveANY implements RFC 8482 mitigation for QTYPE ANY (255). Instead of
+// returning every RRset at the name, the server answers with a single synthesized
+// HINFO record and sets the TC bit to discourage amplification.
+func (p *Processor) resolveANY(name string, trusted bool) ([]mdns.RR, int, bool) {
+	if !p.nameExistsInZone(name, trusted) {
+		return nil, mdns.RcodeNameError, true
+	}
+
+	if soa := p.lookupZoneSOA(name, trusted); soa != nil {
+		return []mdns.RR{mdns.Copy(soa)}, mdns.RcodeSuccess, false
+	}
+
+	hinfo := &mdns.HINFO{
+		Hdr: mdns.RR_Header{
+			Name:   storage.NormalizeName(name),
+			Rrtype: mdns.TypeHINFO,
+			Class:  mdns.ClassINET,
+			Ttl:    300,
+		},
+		Cpu: "RFC8482",
+		Os:  "https://datatracker.ietf.org/doc/html/rfc8482",
+	}
+	return []mdns.RR{hinfo}, mdns.RcodeSuccess, false
+}
+
+func (p *Processor) nameExistsInZone(name string, trusted bool) bool {
+	if trusted && p.store.NameExistsInternal(name) {
+		return true
+	}
+	return p.store.NameExistsPublic(name)
+}
+
+func (p *Processor) lookupZoneSOA(name string, trusted bool) mdns.RR {
+	labels := splitDNSLabels(storage.NormalizeName(name))
+	for i := len(labels) - 1; i >= 0; i-- {
+		apex := strings.Join(labels[i:], ".") + "."
+		records, status := p.authoritativeLookup(apex, mdns.TypeSOA, trusted)
+		if status == storage.LookupFound && len(records) > 0 {
+			return records[0]
+		}
+	}
+	return nil
+}
+
+func splitDNSLabels(fqdn string) []string {
+	fqdn = strings.TrimSuffix(fqdn, ".")
+	if fqdn == "" {
+		return nil
+	}
+	return strings.Split(fqdn, ".")
 }
 
 func (p *Processor) authoritativeLookup(name string, qtype uint16, trusted bool) ([]mdns.RR, storage.LookupStatus) {
