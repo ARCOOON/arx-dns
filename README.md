@@ -24,14 +24,28 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                                                                                                                |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                                                                                                              |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                                                                                                                   |
-| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                                                                                                                                     |
+| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, embedded WebUI, and zone parameter validation                                                                                                                                                     |
+| `ui/`                 | Vue 3 + Vite + TypeScript management WebUI (shadcn-vue / radix-vue); production build in `ui/dist/` embedded into the binary via `//go:embed`                                                                                                                                                                    |
 
 ## Build & Run
 
 ```bash
+cd ui && npm install && npm run build && cd ..
 go build -o arx-dns ./cmd/arx-dns/
 ./arx-dns   # reads ./config.toml (auto-created with defaults on first run)
 ```
+
+The management WebUI is compiled to `ui/dist/` and embedded into the binary. Run `npm run build` in `ui/` before `go build` when the frontend changes. Docker builds compile the UI automatically in the builder stage.
+
+### WebUI Development
+
+```bash
+cd ui
+npm install
+npm run dev    # Vite dev server (default http://127.0.0.1:5173)
+```
+
+Stack: Vue 3, TypeScript, Vite, Tailwind CSS v4, shadcn-vue (radix-vue primitives), OKLCH theme tokens, Noto Sans headings, Source Sans 3 body text. Add components with `npx shadcn-vue@latest add <component>`.
 
 ## Docker Deployment
 
@@ -527,17 +541,18 @@ curl -s http://127.0.0.1:8080/metrics
 
 ### Management API
 
-A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication, optional TLS, structured audit logging for mutations, and strict zone-name validation on record endpoints.
+A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication, optional TLS, structured audit logging for mutations, strict zone-name validation on record endpoints, and an embedded Vue 3 management WebUI served from `/` without authentication.
 
-| Endpoint                       | Method | Auth   | Description                                                                   |
-| ------------------------------ | ------ | ------ | ----------------------------------------------------------------------------- |
-| `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                     |
-| `/metrics`                     | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                  |
-| `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                               |
-| `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)           |
-| `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                            |
-| `/api/v1/zones/{zone}/records` | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file      |
-| `/api/v1/zones/{zone}/records` | DELETE | Bearer | Remove a matching DNS record from the zone; persists to the BIND `.zone` file |
+| Endpoint                       | Method | Auth   | Description                                                                       |
+| ------------------------------ | ------ | ------ | --------------------------------------------------------------------------------- |
+| `/`                            | GET    | None   | Embedded management WebUI (Vue SPA); client-side routes fall back to `index.html` |
+| `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                         |
+| `/metrics`                     | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                      |
+| `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                                   |
+| `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)               |
+| `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                                |
+| `/api/v1/zones/{zone}/records` | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file          |
+| `/api/v1/zones/{zone}/records` | DELETE | Bearer | Remove a matching DNS record from the zone; persists to the BIND `.zone` file     |
 
 Record create/delete payloads use JSON:
 

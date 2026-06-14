@@ -96,6 +96,7 @@
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
+  - [x] Management WebUI scaffold: Vue 3 + Vite + TypeScript + shadcn-vue (radix-vue), OKLCH theme, Google Fonts typography, `ui/dist` embedded via `//go:embed`, SPA routing fallback on management API listener (Phase 32).
 
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, NOTIFY sent/failed counters, QNAME minimization fallback counter, and RTT registry size (`rtt_tracked_ips`) (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
