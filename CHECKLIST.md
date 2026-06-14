@@ -39,6 +39,7 @@
   - [x] ECS-aware cache keys for forwarded upstream responses (Phase 23).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` recursive responses (Phase 19).
   - [x] Full iterative resolution starting from root servers with delegation walking, glue/sub-query NS resolution, depth limit, and Ristretto cache integration (Phase 29).
+  - [x] Autonomous root hints fetcher: HTTP GET from InterNIC `named.root`, 30-day local cache (`./named.root`), A/AAAA parsing, and hybrid forward/iterative switch via `resolver.mode` (Phase 36).
   - [x] QNAME Minimization (RFC 7816) for enhanced privacy with SERVFAIL/REFUSED/timeout fallback and `qname_min_fallbacks` telemetry (Phase 30).
 - [x] **Caching Engine:**
   - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
