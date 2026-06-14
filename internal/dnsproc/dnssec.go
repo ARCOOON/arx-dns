@@ -17,17 +17,17 @@ var ErrDNSSECValidationFailed = errors.New("dnssec validation failed")
 
 // DNSSECValidator verifies RRSIG records in upstream responses using DNSKEY material.
 type DNSSECValidator struct {
-	forwarder *Forwarder
-	stats     *telemetry.Stats
-	logger    *slog.Logger
+	resolver ExchangeResolver
+	stats    *telemetry.Stats
+	logger   *slog.Logger
 }
 
-// NewDNSSECValidator builds a validator that reuses the upstream forwarder for DNSKEY lookups.
-func NewDNSSECValidator(forwarder *Forwarder, stats *telemetry.Stats, logger *slog.Logger) *DNSSECValidator {
+// NewDNSSECValidator builds a validator that reuses the configured resolver for DNSKEY lookups.
+func NewDNSSECValidator(resolver ExchangeResolver, stats *telemetry.Stats, logger *slog.Logger) *DNSSECValidator {
 	return &DNSSECValidator{
-		forwarder: forwarder,
-		stats:     stats,
-		logger:    logger,
+		resolver: resolver,
+		stats:    stats,
+		logger:   logger,
 	}
 }
 
@@ -101,15 +101,15 @@ func (v *DNSSECValidator) verifySignature(sig *mdns.RRSIG, rrset []mdns.RR) erro
 }
 
 func (v *DNSSECValidator) fetchDNSKEYs(zone string) ([]mdns.RR, error) {
-	if v.forwarder == nil {
-		return nil, errors.New("forwarder is not configured")
+	if v.resolver == nil {
+		return nil, errors.New("resolver is not configured")
 	}
 
 	req := new(mdns.Msg)
 	req.SetQuestion(mdns.Fqdn(zone), mdns.TypeDNSKEY)
 	req.RecursionDesired = true
 
-	resp, err := v.forwarder.Exchange(req, netip.Addr{})
+	resp, err := v.resolver.Exchange(req, netip.Addr{})
 	if err != nil {
 		return nil, fmt.Errorf("dnskey lookup: %w", err)
 	}

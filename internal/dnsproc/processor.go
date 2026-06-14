@@ -34,6 +34,8 @@ type CookieHandler interface {
 type Processor struct {
 	store            *storage.Memory
 	forwarder        *Forwarder
+	iterative        *IterativeResolver
+	resolverMode     string
 	cache            *storage.ResponseCache
 	stats            *telemetry.Stats
 	acl              TrustedChecker
@@ -50,10 +52,12 @@ type Processor struct {
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, logger *slog.Logger) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolver, resolverMode string, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, logger *slog.Logger) *Processor {
 	p := &Processor{
 		store:            store,
 		forwarder:        forwarder,
+		iterative:        iterative,
+		resolverMode:     resolverMode,
 		cache:            cache,
 		stats:            stats,
 		acl:              acl,
@@ -67,10 +71,22 @@ func New(store *storage.Memory, forwarder *Forwarder, cache *storage.ResponseCac
 		notifier:         notifier,
 		logger:           logger,
 	}
-	if dnssecValidation && forwarder != nil {
-		p.validator = NewDNSSECValidator(forwarder, stats, logger)
+	if dnssecValidation {
+		if res := p.activeResolver(); res != nil {
+			p.validator = NewDNSSECValidator(res, stats, logger)
+		}
 	}
 	return p
+}
+
+func (p *Processor) activeResolver() ExchangeResolver {
+	if strings.EqualFold(strings.TrimSpace(p.resolverMode), "iterative") && p.iterative != nil {
+		return p.iterative
+	}
+	if p.forwarder != nil {
+		return p.forwarder
+	}
+	return nil
 }
 
 // Response parses a UDP DNS query and returns a response with EDNS0 truncation when needed.
@@ -144,8 +160,8 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 		if !trusted {
 			return p.refusedResponse(req, limitUDP, client, cookieCtx)
 		}
-		if p.forwarder != nil {
-			return p.forwardQuery(req, client, limitUDP, cookieCtx)
+		if res := p.activeResolver(); res != nil {
+			return p.recursiveQuery(req, client, limitUDP, cookieCtx, res)
 		}
 	}
 
@@ -226,11 +242,8 @@ func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool, client netip.A
 	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
-func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool, cookieCtx cookieContext) ([]byte, error) {
-	ecsCtx := storage.ECSContext{}
-	if p.forwarder != nil {
-		ecsCtx = p.forwarder.ECSCacheContext(client)
-	}
+func (p *Processor) recursiveQuery(req *mdns.Msg, client netip.Addr, limitUDP bool, cookieCtx cookieContext, resolver ExchangeResolver) ([]byte, error) {
+	ecsCtx := resolver.ECSCacheContext(client)
 	key := storage.CacheKey(req.Question[0], req, ecsCtx)
 
 	if p.cache != nil {
@@ -250,7 +263,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool
 		}
 	}
 
-	resp, err := p.forwarder.Exchange(req, client)
+	resp, err := resolver.Exchange(req, client)
 	if err != nil {
 		fallback := new(mdns.Msg)
 		fallback.SetReply(req)
@@ -293,6 +306,18 @@ func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool
 	resp.SetReply(req)
 	resp.RecursionAvailable = true
 	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+}
+
+func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool, cookieCtx cookieContext) ([]byte, error) {
+	if p.forwarder == nil {
+		fallback := new(mdns.Msg)
+		fallback.SetReply(req)
+		fallback.RecursionAvailable = true
+		fallback.Authoritative = false
+		fallback.Rcode = mdns.RcodeServerFailure
+		return p.packResponse(fallback, req, limitUDP, client, cookieCtx)
+	}
+	return p.recursiveQuery(req, client, limitUDP, cookieCtx, p.forwarder)
 }
 
 type cookieContext struct {
