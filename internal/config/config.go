@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,6 +28,13 @@ type Config struct {
 	Security  SecurityConfig  `toml:"security"`
 	RateLimit RateLimitConfig `toml:"rate_limit"`
 	ECS       ECSConfig       `toml:"ecs"`
+	Update    UpdateConfig    `toml:"update"`
+}
+
+// UpdateConfig controls RFC 2136 dynamic DNS updates secured with TSIG.
+type UpdateConfig struct {
+	// Keys maps TSIG key names (canonical FQDN, e.g. "update-key.") to base64-encoded secrets.
+	Keys map[string]string `toml:"keys"`
 }
 
 // ECSConfig controls EDNS Client Subnet (RFC 7871) forwarding to upstream resolvers.
@@ -192,6 +200,7 @@ func Load(path string) (Config, error) {
 	}
 
 	cfg.applyDefaults()
+	cfg.normalizeUpdateKeys()
 	if err := cfg.EnsureDNSCookieSecret(path); err != nil {
 		return Config{}, fmt.Errorf("ensure dns cookie secret: %w", err)
 	}
@@ -311,8 +320,78 @@ func (c Config) Validate() error {
 	if err := c.validateECS(); err != nil {
 		return err
 	}
+	if err := c.validateUpdate(); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+func (c *Config) normalizeUpdateKeys() {
+	if c.Update.Keys == nil {
+		c.Update.Keys = make(map[string]string)
+		return
+	}
+	normalized := make(map[string]string, len(c.Update.Keys))
+	for name, secret := range c.Update.Keys {
+		name = normalizeTSIGKeyName(name)
+		if name == "" {
+			continue
+		}
+		normalized[name] = strings.TrimSpace(secret)
+	}
+	c.Update.Keys = normalized
+}
+
+func normalizeTSIGKeyName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return ""
+	}
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+	return name
+}
+
+func (c Config) validateUpdate() error {
+	for name, secret := range c.Update.Keys {
+		if secret == "" {
+			return fmt.Errorf("update.keys[%q] must not be empty", name)
+		}
+		if _, err := decodeBase64Secret(secret); err != nil {
+			return fmt.Errorf("update.keys[%q]: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func decodeBase64Secret(secret string) ([]byte, error) {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return nil, errors.New("empty secret")
+	}
+	raw, err := base64.StdEncoding.DecodeString(secret)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base64 secret: %w", err)
+	}
+	if len(raw) == 0 {
+		return nil, errors.New("decoded secret is empty")
+	}
+	return raw, nil
+}
+
+// NormalizedTSIGKeys returns TSIG key names mapped to base64 secrets in canonical form.
+func (c Config) NormalizedTSIGKeys() map[string]string {
+	out := make(map[string]string, len(c.Update.Keys))
+	for name, secret := range c.Update.Keys {
+		name = normalizeTSIGKeyName(name)
+		if name == "" {
+			continue
+		}
+		out[name] = strings.TrimSpace(secret)
+	}
+	return out
 }
 
 func (c Config) validateECS() error {
