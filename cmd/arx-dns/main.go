@@ -15,6 +15,7 @@ import (
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
+	"github.com/ARCOOON/arx-dns/internal/logger"
 	"github.com/ARCOOON/arx-dns/internal/network"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
@@ -24,15 +25,18 @@ func main() {
 	configPath := flag.String("config", "./config.toml", "path to the TOML configuration file")
 	flag.Parse()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		logger.Error("failed to load configuration", "config", *configPath, "error", err)
+		slog.Default().Error("failed to load configuration", "config", *configPath, "error", err)
 		os.Exit(1)
 	}
+
+	log, err := logger.New(cfg.Server.LogLevel)
+	if err != nil {
+		slog.Default().Error("invalid log level configuration", "log_level", cfg.Server.LogLevel, "error", err)
+		os.Exit(1)
+	}
+	logger := log
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -56,7 +60,7 @@ func main() {
 
 	stats := telemetry.New()
 
-	responseCache, err := storage.NewResponseCache()
+	responseCache, err := storage.NewResponseCache(logger)
 	if err != nil {
 		logger.Error("failed to initialize response cache", "error", err)
 		os.Exit(1)
@@ -81,7 +85,7 @@ func main() {
 	}
 	notifier := dnsproc.NewNotifier(cfg.XFR.Enabled, notifySlaves, cfg.ListenAddress(), stats, logger)
 
-	forwarder, err := dnsproc.NewForwarderFromConfig(cfg, stats)
+	forwarder, err := dnsproc.NewForwarderFromConfig(cfg, stats, logger)
 	if err != nil && cfg.ResolverMode() == "forward" {
 		logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
 		os.Exit(1)
@@ -89,7 +93,7 @@ func main() {
 
 	var iterative *dnsproc.IterativeResolver
 	if cfg.ResolverMode() == "iterative" {
-		iterative, err = dnsproc.NewIterativeFromConfig(cfg, stats)
+		iterative, err = dnsproc.NewIterativeFromConfig(cfg, stats, logger)
 		if err != nil {
 			logger.Error("invalid iterative resolver configuration", "root_hints", cfg.Resolver.RootHints, "error", err)
 			os.Exit(1)
@@ -138,6 +142,7 @@ func main() {
 
 	logger.Info("starting arx-dns",
 		"config", *configPath,
+		"log_level", cfg.Server.LogLevel,
 		"address", cfg.ListenAddress(),
 		"api", cfg.API.Listen,
 		"event_loops", cfg.Server.EventLoops,
