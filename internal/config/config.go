@@ -107,8 +107,9 @@ type RecursiveConfig struct {
 
 // ResolverConfig selects recursive resolution strategy (forward vs iterative from root hints).
 type ResolverConfig struct {
-	Mode      string   `toml:"mode"`
-	RootHints []string `toml:"root_hints"`
+	Mode              string   `toml:"mode"`
+	RootHints         []string `toml:"root_hints"`
+	QNameMinimization bool     `toml:"qname_minimization"`
 }
 
 // FirewallConfig controls DNS blocklist loading and block actions.
@@ -186,8 +187,9 @@ func Default() Config {
 			},
 		},
 		Resolver: ResolverConfig{
-			Mode:      defaultResolverMode,
-			RootHints: DefaultRootHints(),
+			Mode:              defaultResolverMode,
+			RootHints:         DefaultRootHints(),
+			QNameMinimization: true,
 		},
 		Firewall: FirewallConfig{
 			BlocklistsDirectory: defaultBlocklistsDir,
