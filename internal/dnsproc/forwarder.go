@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"strings"
 	"time"
 
 	mdns "github.com/miekg/dns"
 
 	"github.com/ARCOOON/arx-dns/internal/config"
+	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
 
@@ -24,6 +26,9 @@ type Forwarder struct {
 	client           *mdns.Client
 	stats            *telemetry.Stats
 	dnssecValidation bool
+	ecsEnabled       bool
+	ecsIPv4PrefixLen uint8
+	ecsIPv6PrefixLen uint8
 }
 
 // NewForwarderFromConfig builds an upstream forwarder from application configuration.
@@ -34,6 +39,9 @@ func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats) (*Forward
 	}
 	f := NewForwarder(addrs, stats)
 	f.dnssecValidation = cfg.Security.DNSSECValidation
+	f.ecsEnabled = cfg.ECS.Enabled
+	f.ecsIPv4PrefixLen = uint8(cfg.ECS.IPv4PrefixLength)
+	f.ecsIPv6PrefixLen = uint8(cfg.ECS.IPv6PrefixLength)
 	return f, nil
 }
 
@@ -48,6 +56,19 @@ func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
 			Timeout: defaultUpstreamTimeout,
 		},
 		stats: stats,
+	}
+}
+
+// ECSCacheContext returns ECS settings for response cache key generation.
+func (f *Forwarder) ECSCacheContext(client netip.Addr) storage.ECSContext {
+	if f == nil {
+		return storage.ECSContext{}
+	}
+	return storage.ECSContext{
+		Enabled:       f.ecsEnabled,
+		Client:        client,
+		IPv4PrefixLen: f.ecsIPv4PrefixLen,
+		IPv6PrefixLen: f.ecsIPv6PrefixLen,
 	}
 }
 
@@ -89,12 +110,12 @@ func NormalizeUpstreams(addrs []string) ([]string, error) {
 }
 
 // Exchange forwards req to upstream resolvers sequentially until one responds successfully.
-func (f *Forwarder) Exchange(req *mdns.Msg) (*mdns.Msg, error) {
+func (f *Forwarder) Exchange(req *mdns.Msg, client netip.Addr) (*mdns.Msg, error) {
 	if f == nil || len(f.upstreams) == 0 {
 		return nil, ErrAllUpstreamsFailed
 	}
 
-	upstreamReq := f.prepareUpstreamRequest(req)
+	upstreamReq, ecsForwarded := f.prepareUpstreamRequest(req, client)
 
 	for _, upstream := range f.upstreams {
 		resp, _, err := f.client.Exchange(upstreamReq, upstream)
@@ -107,6 +128,9 @@ func (f *Forwarder) Exchange(req *mdns.Msg) (*mdns.Msg, error) {
 
 		if f.stats != nil {
 			f.stats.IncForwardedQuery()
+			if ecsForwarded {
+				f.stats.IncECSQueriesForwarded()
+			}
 		}
 		return resp, nil
 	}
@@ -117,17 +141,60 @@ func (f *Forwarder) Exchange(req *mdns.Msg) (*mdns.Msg, error) {
 	return nil, ErrAllUpstreamsFailed
 }
 
-// prepareUpstreamRequest clones req and sets the EDNS DO bit when DNSSEC validation is enabled.
-func (f *Forwarder) prepareUpstreamRequest(req *mdns.Msg) *mdns.Msg {
+// prepareUpstreamRequest clones req, applies DNSSEC DO when enabled, and attaches ECS when configured.
+func (f *Forwarder) prepareUpstreamRequest(req *mdns.Msg, client netip.Addr) (*mdns.Msg, bool) {
 	upstreamReq := req.Copy()
-	if f != nil && f.dnssecValidation {
-		udpSize := uint16(mdns.DefaultMsgSize)
-		if opt := req.IsEdns0(); opt != nil && opt.UDPSize() >= mdns.MinMsgSize {
-			udpSize = opt.UDPSize()
+
+	if _, hasECS := storage.ExtractECSSubnet(req); hasECS {
+		if f != nil && f.dnssecValidation {
+			f.applyDNSSECDO(upstreamReq, req)
 		}
-		upstreamReq.SetEdns0(udpSize, true)
+		return upstreamReq, true
 	}
-	return upstreamReq
+
+	ecsForwarded := false
+	if f != nil && f.ecsEnabled && client.IsValid() {
+		subnet := storage.BuildECSSubnet(client, f.ecsIPv4PrefixLen, f.ecsIPv6PrefixLen)
+		if subnet != nil {
+			f.ensureEDNS(upstreamReq, req)
+			opt := upstreamReq.IsEdns0()
+			opt.Option = append(opt.Option, subnet)
+			ecsForwarded = true
+		}
+	}
+
+	if f != nil && f.dnssecValidation {
+		f.applyDNSSECDO(upstreamReq, req)
+	}
+
+	return upstreamReq, ecsForwarded
+}
+
+func (f *Forwarder) ensureEDNS(upstreamReq, req *mdns.Msg) {
+	if upstreamReq.IsEdns0() != nil {
+		return
+	}
+	udpSize := uint16(mdns.DefaultMsgSize)
+	if opt := req.IsEdns0(); opt != nil && opt.UDPSize() >= mdns.MinMsgSize {
+		udpSize = opt.UDPSize()
+	}
+	upstreamReq.SetEdns0(udpSize, false)
+}
+
+func (f *Forwarder) applyDNSSECDO(upstreamReq, req *mdns.Msg) {
+	if opt := upstreamReq.IsEdns0(); opt != nil {
+		if opt.UDPSize() < mdns.MinMsgSize {
+			opt.SetUDPSize(mdns.MinMsgSize)
+		}
+		opt.SetDo()
+		return
+	}
+
+	udpSize := uint16(mdns.DefaultMsgSize)
+	if opt := req.IsEdns0(); opt != nil && opt.UDPSize() >= mdns.MinMsgSize {
+		udpSize = opt.UDPSize()
+	}
+	upstreamReq.SetEdns0(udpSize, true)
 }
 
 // SetDNSSECValidation enables or disables the EDNS DO bit on upstream requests.
@@ -137,10 +204,21 @@ func (f *Forwarder) SetDNSSECValidation(enabled bool) {
 	}
 }
 
+// SetECS enables EDNS Client Subnet forwarding with the given prefix lengths.
+func (f *Forwarder) SetECS(enabled bool, ipv4PrefixLen, ipv6PrefixLen uint8) {
+	if f == nil {
+		return
+	}
+	f.ecsEnabled = enabled
+	f.ecsIPv4PrefixLen = ipv4PrefixLen
+	f.ecsIPv6PrefixLen = ipv6PrefixLen
+}
+
 // PrepareUpstreamRequest returns the upstream query with EDNS options applied.
-func (f *Forwarder) PrepareUpstreamRequest(req *mdns.Msg) *mdns.Msg {
+func (f *Forwarder) PrepareUpstreamRequest(req *mdns.Msg, client netip.Addr) *mdns.Msg {
 	if f == nil {
 		return req.Copy()
 	}
-	return f.prepareUpstreamRequest(req)
+	prepared, _ := f.prepareUpstreamRequest(req, client)
+	return prepared
 }

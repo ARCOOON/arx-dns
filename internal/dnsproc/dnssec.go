@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"time"
 
 	mdns "github.com/miekg/dns"
@@ -108,7 +109,7 @@ func (v *DNSSECValidator) fetchDNSKEYs(zone string) ([]mdns.RR, error) {
 	req.SetQuestion(mdns.Fqdn(zone), mdns.TypeDNSKEY)
 	req.RecursionDesired = true
 
-	resp, err := v.forwarder.Exchange(req)
+	resp, err := v.forwarder.Exchange(req, netip.Addr{})
 	if err != nil {
 		return nil, fmt.Errorf("dnskey lookup: %w", err)
 	}

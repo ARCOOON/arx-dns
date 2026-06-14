@@ -188,7 +188,11 @@ func (p *Processor) refusedResponse(req *mdns.Msg, limitUDP bool, client netip.A
 }
 
 func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool, cookieCtx cookieContext) ([]byte, error) {
-	key := storage.QuestionKey(req.Question[0])
+	ecsCtx := storage.ECSContext{}
+	if p.forwarder != nil {
+		ecsCtx = p.forwarder.ECSCacheContext(client)
+	}
+	key := storage.CacheKey(req.Question[0], req, ecsCtx)
 
 	if p.cache != nil {
 		if cached, ok := p.cache.Get(key); ok {
@@ -207,7 +211,7 @@ func (p *Processor) forwardQuery(req *mdns.Msg, client netip.Addr, limitUDP bool
 		}
 	}
 
-	resp, err := p.forwarder.Exchange(req)
+	resp, err := p.forwarder.Exchange(req, client)
 	if err != nil {
 		fallback := new(mdns.Msg)
 		fallback.SetReply(req)
