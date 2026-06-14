@@ -359,8 +359,8 @@ func (p *Processor) badCookieResponse(req *mdns.Msg, client netip.Addr, cookieCt
 }
 
 // packResponse appends an EDNS0 OPT record when the request carried one, truncates UDP
-// responses to the negotiated payload size (512 bytes when EDNS0 is absent), and sets TC
-// when records are omitted.
+// responses to the negotiated payload size (512 bytes when EDNS0 is absent), sets TC
+// when records are omitted, and enables RFC 1035 name compression before serialization.
 func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
 	if opt := req.IsEdns0(); opt != nil {
 		resp.SetEdns0(opt.UDPSize(), opt.Do())
@@ -378,6 +378,7 @@ func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool, client neti
 		}
 	}
 
+	resp.Compress = true
 	return resp.Pack()
 }
 
