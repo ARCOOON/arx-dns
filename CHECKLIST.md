@@ -35,10 +35,10 @@
   - [x] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996) (Phase 28).
 - [ ] **Recursive / Resolver Mode:**
   - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
-  - [x] TTL-aware in-memory cache for forwarded upstream responses with hit/miss telemetry (Phase 08).
+  - [x] TTL-aware in-memory cache for recursive responses with hit/miss telemetry (Phase 08).
   - [x] ECS-aware cache keys for forwarded upstream responses (Phase 23).
-  - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` forwarded responses (Phase 19).
-  - [ ] Full iterative resolution starting from root servers (`named.root`).
+  - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` recursive responses (Phase 19).
+  - [x] Full iterative resolution starting from root servers with delegation walking, glue/sub-query NS resolution, depth limit, and Ristretto cache integration (Phase 29).
   - [ ] QNAME Minimization (RFC 7816) for enhanced privacy.
 - [ ] **Caching Engine:**
   - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
@@ -89,7 +89,7 @@
 
 ## 8. Management, Automation & Observability
 
-- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; `[ecs]` section for EDNS Client Subnet forwarding; `[xfr]` section for zone transfer ACLs and NOTIFY slaves; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22, Phase 23, Phase 28).
+- [x] **Unified TOML Configuration:** Single `config.toml` file with auto-generation on first start; `[tls]` and `[listeners]` sections for encrypted DNS; `[security]` section for DNSSEC validation and DNS Cookies; `[ecs]` section for EDNS Client Subnet forwarding; `[resolver]` section for forward vs iterative recursive mode and root hints; `[xfr]` section for zone transfer ACLs and NOTIFY slaves; all legacy CLI flags migrated to typed `internal/config` struct (Phase 12, Phase 14, Phase 16, Phase 22, Phase 23, Phase 28, Phase 29).
 - [~] **API-First Design:** Complete REST or gRPC interface for zero-downtime CRUD operations on records and zones.
   - [x] Health, telemetry stats, and manual zone reload endpoints (Phase 15).
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).

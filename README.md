@@ -15,16 +15,16 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                  | Purpose                                                                                                                                                                                                                                                                          |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                                                                                                             |
-| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                                                                           |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                                                                                  |
-| `internal/dnsproc/`   | DNS message parse/serialize, RFC 1035 name compression on all outgoing responses, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
-| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                                                                                |
-| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                                                                              |
-| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                                                                                   |
-| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                                                                                                     |
+| Path                  | Purpose                                                                                                                                                                                                                                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                                                                                                                                             |
+| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                                                                                                           |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                                                                                                                  |
+| `internal/dnsproc/`   | DNS message parse/serialize, RFC 1035 name compression on all outgoing responses, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, upstream forwarding, iterative root-hint resolution, and DNSSEC validation |
+| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                                                                                                                |
+| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                                                                                                              |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                                                                                                                   |
+| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                                                                                                                                     |
 
 ## Build & Run
 
@@ -109,6 +109,10 @@ directory = './zones'
 upstreams = ['1.1.1.1:53', '1.0.0.1:53']
 trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
 
+[resolver]
+mode = 'forward'
+root_hints = ['198.41.0.4', '199.9.14.201', '192.33.4.12', '199.7.91.13', '192.203.230.10', '192.5.5.241', '192.32.92.29', '216.146.53.2', '192.36.134.14', '192.58.128.30', '193.0.14.129', '199.7.83.42', '202.12.27.33']
+
 [firewall]
 blocklists_directory = './blocklists'
 block_action = 'NXDOMAIN'
@@ -151,37 +155,39 @@ tls_cert = './certs/api.crt'
 tls_key = './certs/api.key'
 ```
 
-| Section / Key                    | Default                                       | Description                                                                                   |
-| -------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                         |
-| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                     |
-| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                        |
-| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH                 |
-| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH                |
-| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                        |
-| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                               |
-| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security                 |
-| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                            |
-| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`           |
-| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`          |
-| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`)   |
-| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                               |
-| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                             |
-| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                       |
-| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                   |
-| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                  |
-| `security.dns_cookies_enabled`   | `true`                                        | Enable RFC 7873 DNS Cookies on EDNS0 OPT records to mitigate spoofing and cache poisoning     |
-| `security.dns_cookie_secret`     | _(auto-generated)_                            | 64-character hex string (32 bytes) HMAC key; generated and persisted on first start if empty  |
-| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                             |
-| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                         |
-| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                           |
-| `ecs.enabled`                    | `false`                                       | Append EDNS Client Subnet (RFC 7871) to upstream recursive queries                            |
-| `ecs.ipv4_prefix_length`         | `24`                                          | IPv4 prefix length sent in ECS options (0–32)                                                 |
-| `ecs.ipv6_prefix_length`         | `56`                                          | IPv6 prefix length sent in ECS options (0–128)                                                |
-| `update.keys`                    | _(empty)_                                     | Map of TSIG key names (canonical FQDN) to base64-encoded secrets for RFC 2136 dynamic updates |
-| `xfr.enabled`                    | `false`                                       | Enable AXFR/IXFR zone transfers over TCP and NOTIFY broadcasts to slaves                      |
-| `xfr.allowed_subnets`            | _(empty)_                                     | CIDR prefixes authorized to request zone transfers (AXFR/IXFR); empty denies all peers        |
-| `xfr.notify_slaves`              | _(empty)_                                     | Slave nameserver IP addresses (or `host:port`) to receive NOTIFY on zone changes              |
+| Section / Key                    | Default                                       | Description                                                                                    |
+| -------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                          |
+| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                      |
+| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                         |
+| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH                  |
+| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH                 |
+| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                         |
+| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                                |
+| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security                  |
+| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                             |
+| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`            |
+| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`           |
+| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`)    |
+| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding (required when `resolver.mode = forward`)      |
+| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                              |
+| `resolver.mode`                  | `forward`                                     | Recursive strategy: `forward` (upstream resolvers) or `iterative` (walk from root hints)       |
+| `resolver.root_hints`            | 13 IANA root IPv4 addresses                   | Root nameserver IPs for iterative mode (`RD=0` queries); default is the standard root hint set |
+| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                        |
+| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                    |
+| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                   |
+| `security.dns_cookies_enabled`   | `true`                                        | Enable RFC 7873 DNS Cookies on EDNS0 OPT records to mitigate spoofing and cache poisoning      |
+| `security.dns_cookie_secret`     | _(auto-generated)_                            | 64-character hex string (32 bytes) HMAC key; generated and persisted on first start if empty   |
+| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                              |
+| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                          |
+| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                            |
+| `ecs.enabled`                    | `false`                                       | Append EDNS Client Subnet (RFC 7871) to upstream recursive queries                             |
+| `ecs.ipv4_prefix_length`         | `24`                                          | IPv4 prefix length sent in ECS options (0–32)                                                  |
+| `ecs.ipv6_prefix_length`         | `56`                                          | IPv6 prefix length sent in ECS options (0–128)                                                 |
+| `update.keys`                    | _(empty)_                                     | Map of TSIG key names (canonical FQDN) to base64-encoded secrets for RFC 2136 dynamic updates  |
+| `xfr.enabled`                    | `false`                                       | Enable AXFR/IXFR zone transfers over TCP and NOTIFY broadcasts to slaves                       |
+| `xfr.allowed_subnets`            | _(empty)_                                     | CIDR prefixes authorized to request zone transfers (AXFR/IXFR); empty denies all peers         |
+| `xfr.notify_slaves`              | _(empty)_                                     | Slave nameserver IP addresses (or `host:port`) to receive NOTIFY on zone changes               |
 
 Example:
 
@@ -351,9 +357,11 @@ dig @127.0.0.1 +short ads.example.com A    # NXDOMAIN (default)
 dig @127.0.0.1 +short ads.example.com A    # 0.0.0.0
 ```
 
-When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server forwards the query to the configured upstream resolvers (`recursive.upstreams`). Before forwarding, the processor checks an in-memory response cache keyed by question name, type, class, and EDNS Client Subnet scope when present (see **EDNS Client Subnet** below). On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately without contacting upstream resolvers. On a cache miss, upstreams are tried sequentially with a 2-second timeout per attempt; the first successful response is stored in the cache, then returned to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. If every upstream fails or times out, the server returns `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
+When a query is not found in the applicable local zone views and the client sets the **Recursion Desired (RD)** flag, the server resolves it recursively using the configured `[resolver]` mode. In **`forward`** mode (default), queries are sent to `recursive.upstreams` sequentially with a 2-second timeout per attempt. In **`iterative`** mode, arx-dns walks the DNS delegation tree from `resolver.root_hints` with **RD=0**, following NS referrals, using glue records from the Additional section when present, and performing sub-queries to resolve nameserver hostnames when glue is absent. A strict depth limit (15 iterations) prevents infinite referral loops; exceeded depth returns `SERVFAIL`.
 
-When `security.dnssec_validation` is enabled (default), upstream requests include the EDNS **DO (DNSSEC OK)** bit so resolvers return `RRSIG` records alongside signed answers. If the response contains `RRSIG` records, arx-dns fetches the zone `DNSKEY` set from upstream and verifies each signature with `github.com/miekg/dns`. Successful validation sets the **AD (Authenticated Data)** bit on the client response. Cryptographic validation failures (BOGUS data) are logged as security warnings, counted in `dnssec_validations_failed`, and answered with `SERVFAIL` without caching the upstream payload.
+Both modes share the same in-memory response cache keyed by question name, type, class, and EDNS Client Subnet scope when present (see **EDNS Client Subnet** below). On a cache hit, record TTLs are decremented by the elapsed time since the response was stored and the cached answer is returned immediately. On a cache miss, the resolver performs the lookup, stores the result, and returns it to the client. Positive answers use the minimum TTL across Answer and Authority records for eviction. Negative answers (`NXDOMAIN` and `NODATA` per RFC 2308) are cached when the Authority section contains an SOA record; eviction TTL is `min(SOA TTL, SOA MINIMUM)`. Negative responses without an SOA are not cached. Resolution failures return `SERVFAIL`. All responses set **Recursion Available (RA)** to indicate recursive capability. Hostnames without an explicit port default to `:53`.
+
+When `security.dnssec_validation` is enabled (default), recursive queries include the EDNS **DO (DNSSEC OK)** bit so authoritative servers return `RRSIG` records alongside signed answers. If the response contains `RRSIG` records, arx-dns fetches the zone `DNSKEY` set and verifies each signature with `github.com/miekg/dns`. Successful validation sets the **AD (Authenticated Data)** bit on the client response. Cryptographic validation failures (BOGUS data) are logged as security warnings, counted in `dnssec_validations_failed`, and answered with `SERVFAIL` without caching the payload.
 
 ### Response rate limiting (RRL)
 
@@ -386,7 +394,7 @@ dig @127.0.0.1 router.arx.local A
 dig @127.0.0.1 www.arx.local A          # CNAME + resolved A in one response
 dig @127.0.0.1 www.arx.local CNAME +tcp
 dig @127.0.0.1 unknown.example.com A   # NXDOMAIN (no RD flag)
-dig @127.0.0.1 +recurse example.com A   # forwarded to upstream resolvers (trusted client)
+dig @127.0.0.1 +recurse example.com A   # recursive resolution (trusted client; forward or iterative per resolver.mode)
 dig @127.0.0.1 +norecurse secret.internal.zone A   # NXDOMAIN for untrusted clients
 ```
 
