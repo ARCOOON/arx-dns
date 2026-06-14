@@ -56,6 +56,10 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "cookies_verified_total", help: "Total number of DNS queries with a valid client and server cookie pair.", load: func(s Snapshot) float64 { return float64(s.CookiesVerified) }},
 		{name: "cookies_rejected_total", help: "Total number of DNS queries rejected with BADCOOKIE due to an invalid server cookie.", load: func(s Snapshot) float64 { return float64(s.CookiesRejected) }},
 		{name: "ecs_queries_forwarded_total", help: "Total number of recursive queries forwarded upstream with an EDNS Client Subnet option.", load: func(s Snapshot) float64 { return float64(s.ECSQueriesForwarded) }},
+		{name: "xfr_completed_total", help: "Total number of completed AXFR or IXFR-downgraded zone transfers.", load: func(s Snapshot) float64 { return float64(s.XFRCompleted) }},
+		{name: "xfr_refused_total", help: "Total number of refused or unauthorized zone transfer attempts.", load: func(s Snapshot) float64 { return float64(s.XFRRefused) }},
+		{name: "notify_sent_total", help: "Total number of RFC 1996 NOTIFY messages sent to slaves.", load: func(s Snapshot) float64 { return float64(s.NotifySent) }},
+		{name: "notify_failed_total", help: "Total number of failed NOTIFY delivery attempts.", load: func(s Snapshot) float64 { return float64(s.NotifyFailed) }},
 	}
 
 	descs := make(map[string]*prometheus.Desc, len(specs))

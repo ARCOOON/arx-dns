@@ -33,6 +33,10 @@ type Stats struct {
 	cookiesVerified         atomic.Uint64
 	cookiesRejected         atomic.Uint64
 	ecsQueriesForwarded     atomic.Uint64
+	xfrCompleted            atomic.Uint64
+	xfrRefused              atomic.Uint64
+	notifySent              atomic.Uint64
+	notifyFailed            atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -68,6 +72,10 @@ type Snapshot struct {
 	CookiesVerified         uint64 `json:"cookies_verified"`
 	CookiesRejected         uint64 `json:"cookies_rejected"`
 	ECSQueriesForwarded     uint64 `json:"ecs_queries_forwarded"`
+	XFRCompleted            uint64 `json:"xfr_completed"`
+	XFRRefused              uint64 `json:"xfr_refused"`
+	NotifySent              uint64 `json:"notify_sent"`
+	NotifyFailed            uint64 `json:"notify_failed"`
 }
 
 // Snapshot returns the current counter values.
@@ -99,6 +107,10 @@ func (s *Stats) Snapshot() Snapshot {
 		CookiesVerified:         s.cookiesVerified.Load(),
 		CookiesRejected:         s.cookiesRejected.Load(),
 		ECSQueriesForwarded:     s.ecsQueriesForwarded.Load(),
+		XFRCompleted:            s.xfrCompleted.Load(),
+		XFRRefused:              s.xfrRefused.Load(),
+		NotifySent:              s.notifySent.Load(),
+		NotifyFailed:            s.notifyFailed.Load(),
 	}
 }
 
@@ -215,4 +227,20 @@ func (s *Stats) IncCookiesRejected() {
 
 func (s *Stats) IncECSQueriesForwarded() {
 	s.ecsQueriesForwarded.Add(1)
+}
+
+func (s *Stats) IncXFRCompleted() {
+	s.xfrCompleted.Add(1)
+}
+
+func (s *Stats) IncXFRRefused() {
+	s.xfrRefused.Add(1)
+}
+
+func (s *Stats) IncNotifySent() {
+	s.notifySent.Add(1)
+}
+
+func (s *Stats) IncNotifyFailed() {
+	s.notifyFailed.Add(1)
 }
