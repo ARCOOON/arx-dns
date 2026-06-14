@@ -85,20 +85,33 @@ func main() {
 	}
 	notifier := dnsproc.NewNotifier(cfg.XFR.Enabled, notifySlaves, cfg.ListenAddress(), stats, logger)
 
-	forwarder, err := dnsproc.NewForwarderFromConfig(cfg, stats, logger)
-	if err != nil && cfg.ResolverMode() == "forward" {
-		logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
-		os.Exit(1)
-	}
+	const rootHintsCachePath = "./named.root"
 
+	var forwarder *dnsproc.Forwarder
 	var iterative *dnsproc.IterativeResolver
-	if cfg.ResolverMode() == "iterative" {
-		iterative, err = dnsproc.NewIterativeFromConfig(cfg, stats, logger)
+
+	switch cfg.ResolverMode() {
+	case "forward":
+		var err error
+		forwarder, err = dnsproc.NewForwarderFromConfig(cfg, stats, logger)
 		if err != nil {
-			logger.Error("invalid iterative resolver configuration", "root_hints", cfg.Resolver.RootHints, "error", err)
+			logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
 			os.Exit(1)
 		}
-		forwarder = nil
+	case "iterative":
+		rootHints, err := dnsproc.FetchOrLoadRootHints(rootHintsCachePath)
+		if err != nil {
+			logger.Error("failed to load root hints", "cache", rootHintsCachePath, "error", err)
+			os.Exit(1)
+		}
+		iterative, err = dnsproc.NewIterativeFromConfig(cfg, rootHints, stats, logger)
+		if err != nil {
+			logger.Error("invalid iterative resolver configuration", "root_hints", rootHints, "error", err)
+			os.Exit(1)
+		}
+	default:
+		logger.Error("invalid resolver mode", "resolver_mode", cfg.ResolverMode())
+		os.Exit(1)
 	}
 
 	var cookieEngine *network.CookieEngine
@@ -149,7 +162,7 @@ func main() {
 		"zones", cfg.Zones.Directory,
 		"upstreams", cfg.Recursive.Upstreams,
 		"resolver_mode", cfg.ResolverMode(),
-		"root_hints", cfg.Resolver.RootHints,
+		"root_hints_cache", rootHintsCachePath,
 		"trusted_subnets", cfg.Recursive.TrustedSubnets,
 		"blocklists", cfg.Firewall.BlocklistsDirectory,
 		"block_action", fwAction,
