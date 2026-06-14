@@ -17,3 +17,4 @@ ui/node_modules/
 /phases/
 /**/*_test.go
 data/
+test/
