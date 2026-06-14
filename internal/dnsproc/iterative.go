@@ -3,6 +3,7 @@ package dnsproc
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -32,22 +33,23 @@ type IterativeResolver struct {
 	dnssecValidation  bool
 	qnameMinimization bool
 	maxDepth          int
+	logger            *slog.Logger
 }
 
 // NewIterativeFromConfig builds an iterative resolver from application configuration.
-func NewIterativeFromConfig(cfg config.Config, stats *telemetry.Stats) (*IterativeResolver, error) {
+func NewIterativeFromConfig(cfg config.Config, stats *telemetry.Stats, logger *slog.Logger) (*IterativeResolver, error) {
 	hints, err := cfg.NormalizedRootHints()
 	if err != nil {
 		return nil, err
 	}
-	r := NewIterativeResolver(hints, stats)
+	r := NewIterativeResolver(hints, stats, logger)
 	r.dnssecValidation = cfg.Security.DNSSECValidation
 	r.qnameMinimization = cfg.Resolver.QNameMinimization
 	return r, nil
 }
 
 // NewIterativeResolver creates an iterative resolver using the given root hint addresses.
-func NewIterativeResolver(rootHints []string, stats *telemetry.Stats) *IterativeResolver {
+func NewIterativeResolver(rootHints []string, stats *telemetry.Stats, logger *slog.Logger) *IterativeResolver {
 	addrs := make([]string, len(rootHints))
 	copy(addrs, rootHints)
 
@@ -60,6 +62,7 @@ func NewIterativeResolver(rootHints []string, stats *telemetry.Stats) *Iterative
 		stats:    stats,
 		rtt:      DefaultRTTRegistry(stats),
 		maxDepth: maxIterativeDepth,
+		logger:   logger,
 	}
 }
 
@@ -108,6 +111,16 @@ func (r *IterativeResolver) resolve(name string, qtype, qclass uint16, servers [
 	current := mdns.Fqdn(name)
 	for cnameSteps := 0; cnameSteps < maxCNAMEChainDepth; cnameSteps++ {
 		queryName, queryType, minimized := r.delegationQueryParams(current, qtype, minLabels)
+		if r.logger != nil {
+			r.logger.Debug("iterative delegation step",
+				"depth", depth,
+				"target_qname", current,
+				"query_qname", queryName,
+				"query_qtype", mdns.TypeToString[queryType],
+				"qname_minimized", minimized,
+				"nameservers", servers,
+			)
+		}
 		req := r.buildQuery(queryName, queryType, qclass)
 		resp, err := r.queryDelegation(req, current, qtype, qclass, servers, minimized)
 		if err != nil {
@@ -188,7 +201,7 @@ func minimizedQName(fqdn string, labelCount int) string {
 }
 
 func (r *IterativeResolver) queryDelegation(req *mdns.Msg, fullName string, qtype, qclass uint16, servers []string, minimized bool) (*mdns.Msg, error) {
-	resp, err := r.queryServers(req, servers)
+	resp, lastServer, err := r.queryServers(req, servers)
 	if !minimized {
 		return resp, err
 	}
@@ -196,8 +209,26 @@ func (r *IterativeResolver) queryDelegation(req *mdns.Msg, fullName string, qtyp
 		if r.stats != nil {
 			r.stats.IncQNameMinFallback()
 		}
+		if r.logger != nil {
+			reason := "servfail_or_refused"
+			if err != nil {
+				reason = "timeout_or_error"
+			}
+			minimizedQNAME := ""
+			if req != nil && len(req.Question) > 0 {
+				minimizedQNAME = req.Question[0].Name
+			}
+			r.logger.Warn("qname minimization fallback to full qname",
+				"full_qname", mdns.Fqdn(fullName),
+				"minimized_qname", minimizedQNAME,
+				"server", lastServer,
+				"reason", reason,
+				"error", err,
+				"rcode", dnsRcodeString(resp),
+			)
+		}
 		fullReq := r.buildQuery(mdns.Fqdn(fullName), qtype, qclass)
-		return r.queryServers(fullReq, servers)
+		return r.queryServersResponse(fullReq, servers)
 	}
 	return resp, nil
 }
@@ -223,13 +254,34 @@ func (r *IterativeResolver) buildQuery(name string, qtype, qclass uint16) *mdns.
 	return msg
 }
 
-func (r *IterativeResolver) queryServers(req *mdns.Msg, servers []string) (*mdns.Msg, error) {
+func (r *IterativeResolver) queryServersResponse(req *mdns.Msg, servers []string) (*mdns.Msg, error) {
+	resp, _, err := r.queryServers(req, servers)
+	return resp, err
+}
+
+func (r *IterativeResolver) queryServers(req *mdns.Msg, servers []string) (*mdns.Msg, string, error) {
 	var lastErr error
+	var lastServer string
+	qname, qtypeStr := iterativeQueryLabels(req)
+
 	for _, server := range r.sortServers(servers) {
+		lastServer = server
 		ip, hasIP := serverIP(server)
 		start := time.Now()
 		resp, _, err := r.client.Exchange(req, server)
 		elapsed := time.Since(start)
+
+		if r.logger != nil {
+			r.logger.Debug("iterative nameserver exchange",
+				"server", server,
+				"qname", qname,
+				"qtype", qtypeStr,
+				"transport", r.client.Net,
+				"latency", elapsed,
+				"error", err,
+				"rcode", dnsRcodeString(resp),
+			)
+		}
 
 		if err != nil {
 			if hasIP {
@@ -256,12 +308,30 @@ func (r *IterativeResolver) queryServers(req *mdns.Msg, servers []string) (*mdns
 		if hasIP {
 			r.rtt.RecordSuccess(ip, elapsed)
 		}
-		return resp, nil
+		return resp, server, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("all nameserver queries failed")
 	}
-	return nil, lastErr
+	return nil, lastServer, lastErr
+}
+
+func iterativeQueryLabels(req *mdns.Msg) (string, string) {
+	if req == nil || len(req.Question) == 0 {
+		return "", ""
+	}
+	q := req.Question[0]
+	return q.Name, mdns.TypeToString[q.Qtype]
+}
+
+func dnsRcodeString(resp *mdns.Msg) string {
+	if resp == nil {
+		return ""
+	}
+	if name, ok := mdns.RcodeToString[resp.Rcode]; ok {
+		return name
+	}
+	return fmt.Sprintf("RCODE%d", resp.Rcode)
 }
 
 func (r *IterativeResolver) pickRoot() []string {

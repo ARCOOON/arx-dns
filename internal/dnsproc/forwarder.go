@@ -3,6 +3,7 @@ package dnsproc
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"strings"
@@ -30,15 +31,16 @@ type Forwarder struct {
 	ecsEnabled       bool
 	ecsIPv4PrefixLen uint8
 	ecsIPv6PrefixLen uint8
+	logger           *slog.Logger
 }
 
 // NewForwarderFromConfig builds an upstream forwarder from application configuration.
-func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats) (*Forwarder, error) {
+func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats, logger *slog.Logger) (*Forwarder, error) {
 	addrs, err := cfg.NormalizedUpstreams()
 	if err != nil {
 		return nil, err
 	}
-	f := NewForwarder(addrs, stats)
+	f := NewForwarder(addrs, stats, logger)
 	f.dnssecValidation = cfg.Security.DNSSECValidation
 	f.ecsEnabled = cfg.ECS.Enabled
 	f.ecsIPv4PrefixLen = uint8(cfg.ECS.IPv4PrefixLength)
@@ -46,7 +48,7 @@ func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats) (*Forward
 	return f, nil
 }
 
-func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
+func NewForwarder(upstreams []string, stats *telemetry.Stats, logger *slog.Logger) *Forwarder {
 	addrs := make([]string, len(upstreams))
 	copy(addrs, upstreams)
 
@@ -56,8 +58,9 @@ func NewForwarder(upstreams []string, stats *telemetry.Stats) *Forwarder {
 			Net:     "udp",
 			Timeout: defaultUpstreamTimeout,
 		},
-		stats: stats,
-		rtt:   DefaultRTTRegistry(stats),
+		stats:  stats,
+		rtt:    DefaultRTTRegistry(stats),
+		logger: logger,
 	}
 }
 
@@ -118,12 +121,25 @@ func (f *Forwarder) Exchange(req *mdns.Msg, client netip.Addr) (*mdns.Msg, error
 	}
 
 	upstreamReq, ecsForwarded := f.prepareUpstreamRequest(req, client)
+	qname, qtypeStr := iterativeQueryLabels(upstreamReq)
 
 	for _, upstream := range f.rtt.SortServers(f.upstreams) {
 		ip, hasIP := serverIP(upstream)
 		start := time.Now()
 		resp, _, err := f.client.Exchange(upstreamReq, upstream)
 		elapsed := time.Since(start)
+
+		if f.logger != nil {
+			f.logger.Debug("upstream exchange",
+				"upstream", upstream,
+				"qname", qname,
+				"qtype", qtypeStr,
+				"transport", f.client.Net,
+				"latency", elapsed,
+				"error", err,
+				"rcode", dnsRcodeString(resp),
+			)
+		}
 
 		if err != nil {
 			if hasIP {
