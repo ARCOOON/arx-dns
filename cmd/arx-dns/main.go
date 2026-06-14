@@ -89,7 +89,7 @@ func main() {
 		cookieEngine = network.NewCookieEngine(secret)
 	}
 
-	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, logger)
+	proc := dnsproc.New(store, forwarder, responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, logger)
 
 	rrl := network.NewRateLimiter(cfg.RateLimit, stats)
 	defer rrl.Close()
@@ -127,6 +127,7 @@ func main() {
 		"rate_limit_enabled", cfg.RateLimit.Enabled,
 		"rate_limit_rps", cfg.RateLimit.RequestsPerSecond,
 		"rate_limit_burst", cfg.RateLimit.Burst,
+		"dynamic_update_keys", len(cfg.Update.Keys),
 	)
 	apiServer := api.New(cfg, stats, store, logger)
 	startService("api", apiServer.Run)
