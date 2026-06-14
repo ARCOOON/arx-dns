@@ -15,16 +15,16 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 
 ### Project Layout
 
-| Path                  | Purpose                                                                                                                                                                                                                     |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                                                        |
-| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                      |
-| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                             |
-| `internal/dnsproc/`   | DNS message parse/serialize, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
-| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                           |
-| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                         |
-| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                              |
-| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                                                |
+| Path                  | Purpose                                                                                                                                                                                                                                                                          |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                                                                                                             |
+| `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                                                                           |
+| `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                                                                                  |
+| `internal/dnsproc/`   | DNS message parse/serialize, RFC 1035 name compression on all outgoing responses, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, upstream forwarding, and DNSSEC validation |
+| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                                                                                |
+| `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                                                                              |
+| `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                                                                                   |
+| `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, and zone parameter validation                                                                                                                                     |
 
 ## Build & Run
 
@@ -221,6 +221,10 @@ API create examples:
 The `value` field accepts BIND `\# <length> <hex>` syntax, `<length> <hex>`, or bare hex (length is derived from the digit count). Declared length must match the hex payload.
 
 Unknown types are stored opaquely in the radix tree and served back to clients with identical wire data. Zone rewrites preserve `TYPE<id>` and `\#` formatting.
+
+### Message compression (RFC 1035)
+
+Every outgoing DNS response — authoritative, forwarded, error, and policy answers on UDP, TCP, DoT, and DoH — is packed with RFC 1035 name compression enabled (`Compress = true`) before serialization. Repeated domain labels (for example multiple NS records sharing the same zone apex) are encoded as pointer references, reducing UDP datagram size and lowering the chance of TC truncation.
 
 ### EDNS0 (RFC 6891)
 

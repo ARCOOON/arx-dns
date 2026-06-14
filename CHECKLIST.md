@@ -22,7 +22,7 @@
   - [x] Enterprise/Sec: `SRV`, `CAA`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16; `SRV` API CRUD and BIND serialization in Phase 18; `CAA`/`SVCB`/`HTTPS` API validation and BIND serialization in Phase 24). `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3` remain open for authoritative signing.
 - [x] **Unknown RR Handling:** Transparent routing and storage of unknown resource records (RFC 3597) via `TYPE<id>` and `\# <length> <hex>` BIND syntax (Phase 24).
 - [x] **ANY Query Mitigation (RFC 8482):** QTYPE 255 returns a minimal authoritative answer (zone SOA or synthesized HINFO) with TC set; full RRset enumeration is not performed (Phase 24).
-- [ ] **Compression Algorithm:** RFC-compliant message compression to minimize packet size.
+- [x] **Compression Algorithm:** RFC 1035 name compression enabled on every outgoing response via `dns.Msg.Compress = true` in `packResponse` (Phase 26).
 
 ## 3. Operational Modes (Hybrid Architecture)
 
