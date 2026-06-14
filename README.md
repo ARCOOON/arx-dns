@@ -277,6 +277,8 @@ Every outgoing DNS response — authoritative, forwarded, error, and policy answ
 
 When a query includes an OPT pseudo-record in the Additional section, the server echoes EDNS0 support in the response and honors the client's advertised UDP payload size. Values below 512 bytes are treated as 512 per RFC 6891. If the assembled UDP response exceeds the negotiated limit (512 bytes when EDNS0 is absent), the **TC (Truncation)** bit is set and records are omitted until the message fits; clients should retry over TCP. TCP responses are never truncated by UDP size limits but still include an OPT record when the request carried one.
 
+Forwarded and cached responses may already contain an upstream OPT pseudo-record in the Additional section. Before appending the server-generated OPT (negotiated UDP size, DO bit echo, DNS Cookie), arx-dns strips all existing OPT records so the outbound message contains **at most one** OPT record per RFC 6891.
+
 ### DNS Cookies (RFC 7873)
 
 When `security.dns_cookies_enabled` is `true` (default), the server processes the EDNS0 Cookie option (`0x0a`):
