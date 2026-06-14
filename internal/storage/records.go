@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -58,7 +59,10 @@ func BuildRecord(zoneOrigin string, in RecordInput) (mdns.RR, error) {
 	case "SVCB", "HTTPS":
 		return buildSVCBRecord(fqdn, ttl, typ, value)
 	default:
-		if strings.HasPrefix(typ, "TYPE") {
+		if isRFC3597TypeName(typ) {
+			if !strings.HasPrefix(typ, "TYPE") {
+				typ = "TYPE" + typ
+			}
 			return buildRFC3597Record(fqdn, ttl, typ, value)
 		}
 		line := fmt.Sprintf("%s %d IN %s %s", fqdn, ttl, typ, value)
@@ -200,6 +204,76 @@ func buildSVCBRecord(owner string, ttl uint32, typ, value string) (mdns.RR, erro
 	return rr, nil
 }
 
+func isRFC3597TypeName(typ string) bool {
+	if strings.HasPrefix(typ, "TYPE") {
+		return true
+	}
+	if _, known := mdns.StringToType[typ]; known {
+		return false
+	}
+	_, err := strconv.ParseUint(typ, 10, 16)
+	return err == nil
+}
+
+// parseRFC3597Value normalizes API and BIND generic RDATA into \# <length> <hex> form
+// and validates that the declared length matches the decoded hex payload.
+func parseRFC3597Value(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("RFC 3597 value is required")
+	}
+
+	raw := value
+	if strings.HasPrefix(raw, `\#`) {
+		raw = strings.TrimSpace(strings.TrimPrefix(raw, `\#`))
+	}
+
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return "", fmt.Errorf("RFC 3597 value is required")
+	}
+
+	var (
+		declaredLen int
+		hexPayload  string
+	)
+
+	if len(fields) == 1 {
+		hexPayload = strings.ToLower(fields[0])
+		if len(hexPayload)%2 != 0 {
+			return "", fmt.Errorf("RFC 3597 hex data must have an even number of digits")
+		}
+		declaredLen = len(hexPayload) / 2
+	} else {
+		lengthField, err := strconv.Atoi(fields[0])
+		if err != nil || lengthField < 0 || lengthField > 65535 {
+			return "", fmt.Errorf("RFC 3597 length must be an integer between 0 and 65535")
+		}
+		declaredLen = lengthField
+		hexPayload = strings.ToLower(strings.Join(fields[1:], ""))
+	}
+
+	if hexPayload == "" {
+		if declaredLen != 0 {
+			return "", fmt.Errorf("RFC 3597 hex data is required")
+		}
+		return `\# 0`, nil
+	}
+
+	if len(hexPayload)%2 != 0 {
+		return "", fmt.Errorf("RFC 3597 hex data must have an even number of digits")
+	}
+	if _, err := hex.DecodeString(hexPayload); err != nil {
+		return "", fmt.Errorf("RFC 3597 hex data is invalid: %w", err)
+	}
+	actualLen := len(hexPayload) / 2
+	if actualLen != declaredLen {
+		return "", fmt.Errorf("RFC 3597 length %d does not match hex data (%d octets)", declaredLen, actualLen)
+	}
+
+	return fmt.Sprintf(`\# %d %s`, declaredLen, hexPayload), nil
+}
+
 func buildRFC3597Record(owner string, ttl uint32, typ string, value string) (mdns.RR, error) {
 	num := strings.TrimPrefix(typ, "TYPE")
 	if num == "" {
@@ -210,16 +284,9 @@ func buildRFC3597Record(owner string, ttl uint32, typ string, value string) (mdn
 		return nil, fmt.Errorf("invalid record type %q", typ)
 	}
 
-	rdata := strings.TrimSpace(value)
-	if rdata == "" {
-		return nil, fmt.Errorf("RFC 3597 value is required")
-	}
-	if !strings.HasPrefix(rdata, `\#`) {
-		fields := strings.Fields(rdata)
-		if len(fields) < 2 {
-			return nil, fmt.Errorf("RFC 3597 value must use \\# <length> <hex> syntax")
-		}
-		rdata = `\# ` + strings.Join(fields, " ")
+	rdata, err := parseRFC3597Value(value)
+	if err != nil {
+		return nil, err
 	}
 
 	line := fmt.Sprintf("%s %d IN %s %s", owner, ttl, typ, rdata)
@@ -555,4 +622,15 @@ func formatRFC3597Rdata(rr *mdns.RFC3597) string {
 		return ""
 	}
 	return fmt.Sprintf(`\# %d %s`, len(rr.Rdata)/2, rr.Rdata)
+}
+
+func recordValuesMatch(rr mdns.RR, want string) bool {
+	got := rrDataValue(rr)
+	if r3597, ok := rr.(*mdns.RFC3597); ok {
+		wantNorm, err := parseRFC3597Value(want)
+		if err == nil {
+			return formatRFC3597Rdata(r3597) == wantNorm
+		}
+	}
+	return got == want
 }

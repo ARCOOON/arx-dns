@@ -82,10 +82,12 @@ func removeMatchingRR(tree *radix.Tree, name string, qtype uint16, value string)
 		return false
 	}
 
+	wantValue := strings.TrimSpace(value)
+
 	var kept []mdns.RR
 	var removed bool
 	for _, rr := range rrs {
-		if rrDataValue(rr) == strings.TrimSpace(value) {
+		if recordValuesMatch(rr, wantValue) {
 			removed = true
 			continue
 		}
