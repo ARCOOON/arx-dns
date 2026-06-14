@@ -128,6 +128,9 @@ enabled = false
 ipv4_prefix_length = 24
 ipv6_prefix_length = 56
 
+[update]
+keys = { "update-key." = "c2VjcmV0LWtleS1mb3ItdGVzdGluZyE=" }
+
 [tls]
 cert_file = './certs/server.crt'
 key_file = './certs/server.key'
@@ -143,33 +146,34 @@ tls_cert = './certs/api.crt'
 tls_key = './certs/api.key'
 ```
 
-| Section / Key                    | Default                                       | Description                                                                                  |
-| -------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                        |
-| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                    |
-| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                       |
-| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH                |
-| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH               |
-| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                       |
-| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                              |
-| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security                |
-| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                           |
-| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`          |
-| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`         |
-| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`)  |
-| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                              |
-| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                            |
-| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                      |
-| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                  |
-| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                 |
-| `security.dns_cookies_enabled`   | `true`                                        | Enable RFC 7873 DNS Cookies on EDNS0 OPT records to mitigate spoofing and cache poisoning    |
-| `security.dns_cookie_secret`     | _(auto-generated)_                            | 64-character hex string (32 bytes) HMAC key; generated and persisted on first start if empty |
-| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                            |
-| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                        |
-| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                          |
-| `ecs.enabled`                    | `false`                                       | Append EDNS Client Subnet (RFC 7871) to upstream recursive queries                           |
-| `ecs.ipv4_prefix_length`         | `24`                                          | IPv4 prefix length sent in ECS options (0–32)                                                |
-| `ecs.ipv6_prefix_length`         | `56`                                          | IPv6 prefix length sent in ECS options (0–128)                                               |
+| Section / Key                    | Default                                       | Description                                                                                   |
+| -------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `server.listen`                  | `0.0.0.0`                                     | IP address to bind to                                                                         |
+| `server.port`                    | `53`                                          | UDP/TCP port to listen on                                                                     |
+| `server.event_loops`             | `0`                                           | gnet event loops per protocol (`0` = one per CPU core)                                        |
+| `tls.cert_file`                  | _(empty)_                                     | PEM certificate path; required together with `tls.key_file` to enable DoT/DoH                 |
+| `tls.key_file`                   | _(empty)_                                     | PEM private key path; required together with `tls.cert_file` to enable DoT/DoH                |
+| `listeners.dot`                  | `:853`                                        | DNS-over-TLS bind address (`host:port` or `:port`); empty disables DoT                        |
+| `listeners.doh`                  | `:443`                                        | DNS-over-HTTPS bind address; empty disables DoH                                               |
+| `api.listen`                     | `127.0.0.1:8080`                              | Management API bind address (`host:port`); defaults to localhost for security                 |
+| `api.auth_token`                 | `dev-token-change-me`                         | Bearer token for authenticated API endpoints; change in production                            |
+| `api.tls_cert`                   | _(empty)_                                     | PEM certificate path for HTTPS management API; required together with `api.tls_key`           |
+| `api.tls_key`                    | _(empty)_                                     | PEM private key path for HTTPS management API; required together with `api.tls_cert`          |
+| `zones.directory`                | `./zones`                                     | Directory containing BIND `.zone` files (public view at root; internal view in `internal/`)   |
+| `recursive.upstreams`            | `1.1.1.1:53`, `1.0.0.1:53`                    | Upstream DNS resolvers for recursive forwarding                                               |
+| `recursive.trusted_subnets`      | `127.0.0.0/8`, `10.0.0.0/8`, `192.168.0.0/16` | CIDR prefixes allowed to use recursive forwarding                                             |
+| `firewall.blocklists_directory`  | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                       |
+| `firewall.block_action`          | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                   |
+| `security.dnssec_validation`     | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                  |
+| `security.dns_cookies_enabled`   | `true`                                        | Enable RFC 7873 DNS Cookies on EDNS0 OPT records to mitigate spoofing and cache poisoning     |
+| `security.dns_cookie_secret`     | _(auto-generated)_                            | 64-character hex string (32 bytes) HMAC key; generated and persisted on first start if empty  |
+| `rate_limit.enabled`             | `true`                                        | Enable per-client-IP response rate limiting (RRL)                                             |
+| `rate_limit.requests_per_second` | `100`                                         | Sustained query rate allowed per client IP (token bucket refill rate)                         |
+| `rate_limit.burst`               | `200`                                         | Maximum burst of queries per client IP before rate limiting applies                           |
+| `ecs.enabled`                    | `false`                                       | Append EDNS Client Subnet (RFC 7871) to upstream recursive queries                            |
+| `ecs.ipv4_prefix_length`         | `24`                                          | IPv4 prefix length sent in ECS options (0–32)                                                 |
+| `ecs.ipv6_prefix_length`         | `56`                                          | IPv6 prefix length sent in ECS options (0–128)                                                |
+| `update.keys`                    | _(empty)_                                     | Map of TSIG key names (canonical FQDN) to base64-encoded secrets for RFC 2136 dynamic updates |
 
 Example:
 
@@ -254,6 +258,39 @@ The TCP reactor enables kernel keep-alive probes (`WithTCPKeepAlive`, 3-minute i
 | `internal` | `zones/internal/*.zone` | Trusted clients only (`recursive.trusted_subnets`) |
 
 Trusted clients (source IP matches `recursive.trusted_subnets`) query the **internal** view first. On `NXDOMAIN`, the processor falls back to the **public** view. Untrusted clients query only the public view.
+
+### Dynamic DNS updates (RFC 2136) with TSIG
+
+Authoritative zones accept **UPDATE** (opcode 5) packets when TSIG keys are configured under `[update]`. Every update request **must** include a valid TSIG signature in the Additional section matching a configured key; unsigned or invalid requests receive **REFUSED**.
+
+| Config key    | Format                               | Description                                                 |
+| ------------- | ------------------------------------ | ----------------------------------------------------------- |
+| `update.keys` | TOML map of key name → base64 secret | TSIG key names must be canonical FQDNs (e.g. `update-key.`) |
+
+The processor evaluates prerequisite records (Answer section), applies add/delete operations (Authority section), atomically swaps the in-memory radix tree, and persists changes to the `.zone` file via `WriteZoneFile`.
+
+Supported update operations:
+
+| RFC 2136 operation        | Wire format hint                 | Effect                                   |
+| ------------------------- | -------------------------------- | ---------------------------------------- |
+| Add to RRset              | `Class=IN` with full RDATA       | Inserts record into radix tree           |
+| Delete RR from RRset      | `Class=NONE` with matching RDATA | Removes exact record                     |
+| Delete RRset              | `Class=ANY`, specific type       | Removes all records of that type at name |
+| Delete all RRsets at name | `Class=ANY`, `Type=ANY`          | Removes every record at name             |
+
+Example `nsupdate` session (requires `update.keys` configured):
+
+```bash
+nsupdate -v <<EOF
+server 127.0.0.1
+key hmac-sha256:update-key. c2VjcmV0LWtleS1mb3ItdGVzdGluZyE=
+zone example.com.
+update add _acme-challenge.example.com. 60 TXT "token"
+send
+EOF
+```
+
+Responses are signed with the same TSIG key. SOA records cannot be modified via dynamic update.
 
 ### Access control (ACL)
 

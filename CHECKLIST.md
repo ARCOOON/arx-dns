@@ -31,7 +31,7 @@
   - [x] CNAME chain following for `A`/`AAAA` queries with loop protection and depth limit (Phase 06).
   - [x] Parsing and validation of standard BIND zone files (Phase 04).
   - [x] fsnotify hot-reload with atomic radix-tree swapping and 500ms debounce (Phase 05).
-  - [ ] Dynamic Updates (RFC 2136) secured via TSIG.
+  - [x] Dynamic Updates (RFC 2136) secured via TSIG.
   - [ ] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996).
 - [ ] **Recursive / Resolver Mode:**
   - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
