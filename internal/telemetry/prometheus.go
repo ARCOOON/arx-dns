@@ -60,6 +60,7 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "xfr_refused_total", help: "Total number of refused or unauthorized zone transfer attempts.", load: func(s Snapshot) float64 { return float64(s.XFRRefused) }},
 		{name: "notify_sent_total", help: "Total number of RFC 1996 NOTIFY messages sent to slaves.", load: func(s Snapshot) float64 { return float64(s.NotifySent) }},
 		{name: "notify_failed_total", help: "Total number of failed NOTIFY delivery attempts.", load: func(s Snapshot) float64 { return float64(s.NotifyFailed) }},
+		{name: "qname_min_fallbacks_total", help: "Total number of iterative queries that fell back from QNAME minimization to the full QNAME.", load: func(s Snapshot) float64 { return float64(s.QNameMinFallbacks) }},
 	}
 
 	descs := make(map[string]*prometheus.Desc, len(specs))

@@ -37,6 +37,7 @@ type Stats struct {
 	xfrRefused              atomic.Uint64
 	notifySent              atomic.Uint64
 	notifyFailed            atomic.Uint64
+	qnameMinFallbacks       atomic.Uint64
 }
 
 // New creates an initialized Stats instance.
@@ -76,6 +77,7 @@ type Snapshot struct {
 	XFRRefused              uint64 `json:"xfr_refused"`
 	NotifySent              uint64 `json:"notify_sent"`
 	NotifyFailed            uint64 `json:"notify_failed"`
+	QNameMinFallbacks       uint64 `json:"qname_min_fallbacks"`
 }
 
 // Snapshot returns the current counter values.
@@ -111,6 +113,7 @@ func (s *Stats) Snapshot() Snapshot {
 		XFRRefused:              s.xfrRefused.Load(),
 		NotifySent:              s.notifySent.Load(),
 		NotifyFailed:            s.notifyFailed.Load(),
+		QNameMinFallbacks:       s.qnameMinFallbacks.Load(),
 	}
 }
 
@@ -243,4 +246,8 @@ func (s *Stats) IncNotifySent() {
 
 func (s *Stats) IncNotifyFailed() {
 	s.notifyFailed.Add(1)
+}
+
+func (s *Stats) IncQNameMinFallback() {
+	s.qnameMinFallbacks.Add(1)
 }
