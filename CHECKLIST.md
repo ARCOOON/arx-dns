@@ -16,7 +16,7 @@
 ## 2. DNS Packet Parsing & Protocol Core
 
 - [x] **RFC 1035 Compliance:** Full binary parsing and serialization of DNS messages (Header, Question, Answer, Authority, Additional sections).
-- [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, OPT echo in responses, and upstream OPT deduplication before server OPT injection (Phase 10, Phase 34). EDNS options beyond DNS Cookies and Path MTU Discovery remain open.
+- [x] **EDNS0 Support (RFC 6891):** OPT detection, negotiated UDP payload truncation with TC bit, OPT echo in responses, upstream OPT deduplication before server OPT injection (Phase 10, Phase 34), and 1232-byte default upstream `dns.Client` UDP receive buffer to avoid MTU fragmentation (Phase 35). EDNS options beyond DNS Cookies and Path MTU Discovery remain open.
 - [x] **Comprehensive Record Type Support:** Native processing of:
   - [x] Core: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `PTR` (`A`, `AAAA`, `CNAME` authoritative lookup in Phase 03; CNAME chain following for `A`/`AAAA` in Phase 06; `MX`/`TXT` API CRUD and BIND serialization in Phase 18; `NS`/`SOA`/`PTR` API validation and BIND serialization in Phase 24).
   - [x] Enterprise/Sec: `SRV`, `CAA`, `SVCB`, `HTTPS` (`RRSIG`/`DNSKEY` validation on forwarded responses in Phase 16; `SRV` API CRUD and BIND serialization in Phase 18; `CAA`/`SVCB`/`HTTPS` API validation and BIND serialization in Phase 24). `TLSA`, `DS`, `DNSKEY`, `RRSIG`, `NSEC`, `NSEC3` remain open for authoritative signing.
@@ -45,6 +45,7 @@
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` responses with SOA-derived TTL (Phase 19).
   - [x] Lockless cache eviction strategies (LRU or LFU) via Ristretto TinyLFU (Phase 08).
   - [x] Infrastructure caching (RTT tracking): EWMA-smoothed per-IP RTT registry with failure penalties, stale-entry sweep, fastest-first upstream/root-hint selection in forwarder and iterative resolver, and `rtt_tracked_ips` telemetry (Phase 31).
+  - [x] Active Directory traffic optimization: immediate local NXDOMAIN for `_msdcs` / `_ldap` / `_sites` queries absent from zone files; no upstream forward (Phase 35).
 
 ## 4. Encrypted DNS & Security
 
@@ -97,7 +98,7 @@
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
   - [x] Management WebUI scaffold: Vue 3 + Vite + TypeScript + shadcn-vue (radix-vue), OKLCH theme, Google Fonts typography, `ui/dist` embedded via `//go:embed`, SPA routing fallback on management API listener (Phase 32).
-  - [x] Dashboard view with live `GET /api/v1/stats` polling, Bearer-token API client, Vite dev proxy, flat sidebar layout shell, and metric cards (Phase 33).
+  - [x] Dashboard view with live `GET /api/v1/stats` polling, Bearer-token API client, Vite dev proxy, flat sidebar layout shell, and metric cards (Phase 33, Phase 35).
 
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, NOTIFY sent/failed counters, QNAME minimization fallback counter, and RTT registry size (`rtt_tracked_ips`) (JSON-serializable snapshot for future API).
 - [x] **Management HTTP API (Phase 15):** `net/http` REST API on configurable `[api]` listener with Bearer token auth; unauthenticated `GET /health`, authenticated `GET /api/v1/stats` and `POST /api/v1/zones/reload`; graceful shutdown with DNS reactors.
