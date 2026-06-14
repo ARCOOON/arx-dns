@@ -464,7 +464,7 @@ func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []md
 	switch q.Qtype {
 	case mdns.TypeA, mdns.TypeAAAA:
 		records, rcode = p.resolveAddress(q.Name, q.Qtype, trusted)
-		needsForward = rcode == mdns.RcodeNameError
+		needsForward = rcode == mdns.RcodeNameError && !isActiveDirectoryQuery(q.Name)
 	case mdns.TypeANY:
 		records, rcode, needsForward = p.resolveANY(q.Name, trusted)
 	default:
@@ -477,7 +477,7 @@ func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []md
 			rcode = mdns.RcodeSuccess
 		default:
 			rcode = mdns.RcodeNameError
-			needsForward = true
+			needsForward = !isActiveDirectoryQuery(q.Name)
 		}
 	}
 	return records, rcode, needsForward
@@ -488,6 +488,9 @@ func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []md
 // HINFO record and sets the TC bit to discourage amplification.
 func (p *Processor) resolveANY(name string, trusted bool) ([]mdns.RR, int, bool) {
 	if !p.nameExistsInZone(name, trusted) {
+		if isActiveDirectoryQuery(name) {
+			return nil, mdns.RcodeNameError, false
+		}
 		return nil, mdns.RcodeNameError, true
 	}
 

@@ -56,6 +56,7 @@ func NewForwarder(upstreams []string, stats *telemetry.Stats, logger *slog.Logge
 		upstreams: addrs,
 		client: &mdns.Client{
 			Net:     "udp",
+			UDPSize: defaultClientUDPSize,
 			Timeout: defaultUpstreamTimeout,
 		},
 		stats:  stats,

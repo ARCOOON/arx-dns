@@ -57,6 +57,7 @@ func NewIterativeResolver(rootHints []string, stats *telemetry.Stats, logger *sl
 		rootHints: addrs,
 		client: &mdns.Client{
 			Net:     "udp",
+			UDPSize: defaultClientUDPSize,
 			Timeout: defaultIterativeTimeout,
 		},
 		stats:    stats,
