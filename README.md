@@ -18,6 +18,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | Path                  | Purpose                                                                                                                                                                                                                                                                                                                                                                             |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cmd/arx-dns/`        | Server entrypoint (`-config` flag, signal handling, reactor startup)                                                                                                                                                                                                                                                                                                                |
+| `cmd/arx-tester/`     | Standalone DNS compliance tester CLI (`-server`, `-port`, `-log`, `-skip-tls`); fetches Top 1000 domains and runs permutation matrix with failover                                                                                                                                                                                                                                  |
 | `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                                                                                                                                                                              |
 | `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                                                                                                                                                                                     |
 | `internal/dnsproc/`   | DNS message parse/serialize, RFC 1035 name compression on all outgoing responses, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, Active Directory local NXDOMAIN optimization, upstream forwarding, autonomous root-hint fetch and iterative resolution, and DNSSEC validation |
@@ -34,6 +35,25 @@ cd ui && npm install && npm run build && cd ..
 go build -o arx-dns ./cmd/arx-dns/
 ./arx-dns   # reads ./config.toml (auto-created with defaults on first run)
 ```
+
+### DNS Compliance Tester (`arx-tester`)
+
+Standalone CLI that downloads a Top 1000 domain list (Tranco daily list via API, Majestic million CSV fallback), executes 35 DNS test permutations (record type × transport × EDNS0/DNSSEC flags), and collects exactly 20 valid responses per permutation against a target resolver. A response counts as valid when the server returns `NOERROR` (including NODATA with zero answers) or `NXDOMAIN`. Domain failover triggers only on transport errors, nil responses, `SERVFAIL`, or `REFUSED`.
+
+```bash
+go build -o arx-tester ./cmd/arx-tester/
+./arx-tester -server 127.0.0.1 -port 53 -log tester-trace.log
+./arx-tester -server 127.0.0.1 -port 53 -skip-tls   # skip DoT permutations when port 853 is unavailable
+```
+
+| Flag        | Default            | Description                                                           |
+| ----------- | ------------------ | --------------------------------------------------------------------- |
+| `-server`   | `127.0.0.1`        | Target DNS server address                                             |
+| `-port`     | `53`               | Target DNS server port                                                |
+| `-log`      | `tester-trace.log` | Deferred trace log path (execution summary first, then query entries) |
+| `-skip-tls` | `false`            | Skip DNS-over-TLS permutations without consuming domain pool          |
+
+Stdout prints one-line summaries with Rcode detail, for example `[OK] google.com (A/udp) - NOERROR (2 answers)` or `[FAILOVER] bad.example (SRV/udp/DNSSEC+EDNS) -> Reason: SERVFAIL`. The trace log is written once at program exit: the `ARX-TESTER: EXECUTION SUMMARY` block appears first, followed by per-query entries. Successful queries (`NOERROR`, `NXDOMAIN`) log a single concise line with answer summary and RTT; failures and failovers log the full `Msg.String()` diagnostic trace. Real-time stdout output is unchanged.
 
 The management WebUI is compiled to `ui/dist/` and embedded into the binary. Run `npm run build` in `ui/` before `go build` when the frontend changes. Docker builds compile the UI automatically in the builder stage.
 
