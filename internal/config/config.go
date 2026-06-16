@@ -69,10 +69,12 @@ type SecurityConfig struct {
 
 // ServerConfig controls the DNS listener bind address and reactor sizing.
 type ServerConfig struct {
-	Listen     string `toml:"listen"`
-	Port       int    `toml:"port"`
-	EventLoops int    `toml:"event_loops"`
-	LogLevel   string `toml:"log_level"`
+	Listen              string `toml:"listen"`
+	Port                int    `toml:"port"`
+	EventLoops          int    `toml:"event_loops"`
+	LogLevel            string `toml:"log_level"`
+	RootHintsFile       string `toml:"root_hints_file"`
+	AutoUpdateRootHints bool   `toml:"auto_update_root_hints"`
 }
 
 // TLSConfig holds the server certificate and private key for encrypted DNS transports.
@@ -137,6 +139,7 @@ const (
 	defaultECSIPv6PrefixLen  = 56
 	defaultResolverMode      = "forward"
 	defaultLogLevel          = "INFO"
+	defaultRootHintsFile     = "./named.root"
 )
 
 // DefaultRootHints returns the 13 standard IPv4 root server addresses (RFC root hint set).
@@ -162,10 +165,12 @@ func DefaultRootHints() []string {
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Listen:     defaultListen,
-			Port:       defaultPort,
-			EventLoops: 0,
-			LogLevel:   defaultLogLevel,
+			Listen:              defaultListen,
+			Port:                defaultPort,
+			EventLoops:          0,
+			LogLevel:            defaultLogLevel,
+			RootHintsFile:       defaultRootHintsFile,
+			AutoUpdateRootHints: true,
 		},
 		Listeners: ListenersConfig{
 			DoT: defaultDoTListen,
@@ -288,6 +293,9 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Server.LogLevel) == "" {
 		c.Server.LogLevel = def.Server.LogLevel
 	}
+	if strings.TrimSpace(c.Server.RootHintsFile) == "" {
+		c.Server.RootHintsFile = def.Server.RootHintsFile
+	}
 	if strings.TrimSpace(c.Zones.Directory) == "" {
 		c.Zones.Directory = def.Zones.Directory
 	}
@@ -345,6 +353,9 @@ func (c Config) Validate() error {
 	}
 	if err := validateLogLevel(c.Server.LogLevel); err != nil {
 		return err
+	}
+	if strings.TrimSpace(c.Server.RootHintsFile) == "" {
+		return errors.New("server.root_hints_file must not be empty")
 	}
 	if strings.TrimSpace(c.Zones.Directory) == "" {
 		return errors.New("zones.directory must not be empty")
@@ -661,7 +672,7 @@ func (c Config) validateResolver() error {
 			return err
 		}
 	case "iterative":
-		// Root hints are loaded dynamically at runtime from ./named.root.
+		// Root hints are loaded dynamically at runtime from server.root_hints_file.
 	default:
 		return fmt.Errorf("resolver.mode must be forward or iterative, got %q", c.Resolver.Mode)
 	}

@@ -39,20 +39,29 @@ func SetRootHintsFetchURLForTest(url string) {
 	rootHintsFetchURL = url
 }
 
-// LoadRootHints returns root server addresses from cachePath or InterNIC.
-// On any failure it logs the error and returns normalized fallback addresses so
-// the engine can still serve local zones without internet at boot.
-func LoadRootHints(cachePath string, fallback []string, logger *slog.Logger) []string {
-	hints, err := FetchOrLoadRootHints(cachePath)
+// LoadRootHints returns root server addresses from cachePath.
+// When autoUpdate is true, stale or missing files are refreshed from InterNIC.
+// When autoUpdate is false, only the local file is read (externally managed).
+// On failure it logs and returns normalized fallback addresses so the engine can
+// still serve local zones without internet at boot.
+func LoadRootHints(cachePath string, autoUpdate bool, fallback []string, logger *slog.Logger) []string {
+	hints, err := FetchOrLoadRootHints(cachePath, autoUpdate)
 	if err == nil {
 		return hints
 	}
 
 	if logger != nil {
-		logger.Error("failed to load root hints, using built-in fallback",
-			"cache", cachePath,
-			"error", err,
-		)
+		if autoUpdate {
+			logger.Error("failed to load root hints, using built-in fallback",
+				"cache", cachePath,
+				"error", err,
+			)
+		} else {
+			logger.Warn("externally managed root hints missing, falling back to internal list",
+				"file", cachePath,
+				"error", err,
+			)
+		}
 	}
 
 	normalized, normErr := NormalizeUpstreams(fallback)
@@ -65,13 +74,18 @@ func LoadRootHints(cachePath string, fallback []string, logger *slog.Logger) []s
 	return normalized
 }
 
-// FetchOrLoadRootHints returns root server addresses from cachePath when the file
-// exists and is newer than 30 days; otherwise it downloads a fresh copy from InterNIC,
-// saves it to cachePath, and parses A/AAAA records into host:port form.
-func FetchOrLoadRootHints(cachePath string) ([]string, error) {
+// FetchOrLoadRootHints returns root server addresses from cachePath.
+// When autoUpdate is false, the file is read and parsed without checking age or
+// contacting InterNIC. When autoUpdate is true, the file is refreshed from InterNIC
+// when missing or older than 30 days, then A/AAAA records are parsed into host:port form.
+func FetchOrLoadRootHints(cachePath string, autoUpdate bool) ([]string, error) {
 	cachePath = strings.TrimSpace(cachePath)
 	if cachePath == "" {
 		return nil, errors.New("root hints cache path must not be empty")
+	}
+
+	if !autoUpdate {
+		return loadRootHintsFromFile(cachePath)
 	}
 
 	needsFetch := true
@@ -99,9 +113,13 @@ func FetchOrLoadRootHints(cachePath string) ([]string, error) {
 		}
 	}
 
+	return loadRootHintsFromFile(cachePath)
+}
+
+func loadRootHintsFromFile(cachePath string) ([]string, error) {
 	data, err := os.ReadFile(cachePath)
 	if err != nil {
-		return nil, fmt.Errorf("read root hints cache %q: %w", cachePath, err)
+		return nil, fmt.Errorf("read root hints file %q: %w", cachePath, err)
 	}
 
 	hints, err := parseRootHints(data)
@@ -109,7 +127,7 @@ func FetchOrLoadRootHints(cachePath string) ([]string, error) {
 		return nil, err
 	}
 	if len(hints) == 0 {
-		return nil, errors.New("no root hint addresses found in cache file")
+		return nil, errors.New("no root hint addresses found in root hints file")
 	}
 	return hints, nil
 }
