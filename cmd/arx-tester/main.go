@@ -181,9 +181,9 @@ func buildExecutionSummaryLines(permutationsRun int, pool *DomainPool) []string 
 		fmt.Sprintf("Total Domains Consumed:  %d (out of %d)", consumed, total),
 		fmt.Sprintf("Total Queries Fired:     %d", totalQueriesAttempted.Load()),
 		"-----------------------------------------",
-		fmt.Sprintf("[✔] Success (With Data): %d", successWithData.Load()),
-		fmt.Sprintf("[✔] Success (Empty/NX):  %d", successEmpty.Load()),
-		fmt.Sprintf("[✖] Failovers Triggered: %d", totalFailovers.Load()),
+		fmt.Sprintf("[+] Success (With Data): %d", successWithData.Load()),
+		fmt.Sprintf("[+] Success (Empty/NX):  %d", successEmpty.Load()),
+		fmt.Sprintf("[X] Failovers Triggered: %d", totalFailovers.Load()),
 		"=========================================",
 	}
 }
