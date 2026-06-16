@@ -18,3 +18,5 @@ ui/node_modules/
 /**/*_test.go
 data/
 test/
+arx-tester
+tester-trace.log
