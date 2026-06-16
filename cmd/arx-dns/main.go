@@ -63,13 +63,13 @@ func main() {
 
 	// Step 3: Fetch/load root hints (falls back to built-in addresses on failure).
 	rootHints := dnsproc.LoadRootHints(
-		cfg.Server.RootHintsFile,
-		cfg.Server.AutoUpdateRootHints,
+		cfg.Resolver.RootHintsFile,
+		cfg.Resolver.AutoUpdateRootHints,
 		config.DefaultRootHints(),
 		logger,
 	)
 	if len(rootHints) == 0 {
-		logger.Error("no root hints available after fetch and fallback", "file", cfg.Server.RootHintsFile)
+		logger.Error("no root hints available after fetch and fallback", "file", cfg.Resolver.RootHintsFile)
 		os.Exit(1)
 	}
 
@@ -181,8 +181,8 @@ func main() {
 		"zones", cfg.Zones.Directory,
 		"upstreams", cfg.Recursive.Upstreams,
 		"resolver_mode", cfg.ResolverMode(),
-		"root_hints_file", cfg.Server.RootHintsFile,
-		"auto_update_root_hints", cfg.Server.AutoUpdateRootHints,
+		"root_hints_file", cfg.Resolver.RootHintsFile,
+		"auto_update_root_hints", cfg.Resolver.AutoUpdateRootHints,
 		"root_hints_count", len(rootHints),
 		"trusted_subnets", cfg.Recursive.TrustedSubnets,
 		"blocklists", cfg.Firewall.BlocklistsDirectory,
