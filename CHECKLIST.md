@@ -39,7 +39,7 @@
   - [x] ECS-aware cache keys for forwarded upstream responses (Phase 23).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` recursive responses (Phase 19).
   - [x] Full iterative resolution starting from root servers with delegation walking, glue/sub-query NS resolution, depth limit, and Ristretto cache integration (Phase 29).
-  - [x] Autonomous root hints fetcher: HTTP GET from InterNIC `named.root`, 30-day local cache (`./named.root`), A/AAAA parsing, built-in IPv4 fallback on fetch failure, and hybrid forward/iterative switch via `resolver.mode` (Phase 36, Phase 38).
+  - [x] Autonomous root hints fetcher: configurable `server.root_hints_file` and `server.auto_update_root_hints`, HTTP GET from InterNIC when auto-update enabled, 30-day local cache, A/AAAA parsing, built-in IPv4 fallback on failure, and hybrid forward/iterative switch via `resolver.mode` (Phase 36, Phase 38, Phase 39).
   - [x] QNAME Minimization (RFC 7816) for enhanced privacy with SERVFAIL/REFUSED/timeout fallback and `qname_min_fallbacks` telemetry (Phase 30).
 - [x] **Caching Engine:**
   - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
@@ -118,3 +118,4 @@
 - [x] **arx-tester global stats (Phase 37.4):** Thread-safe `sync/atomic` counters for total queries fired, failovers triggered, success-with-data, and success-empty/NXDOMAIN; consolidated execution summary block printed at program end with permutation count, domain pool consumption, and outcome totals.
 - [x] **arx-tester smart logging (Phase 37.5):** In-memory `sync.Mutex`-protected log buffer with deferred file write; execution summary prepended at top of log file; success queries log concise one-line entries (domain, type/transport, Rcode, answer summary, RTT); failure/failover queries log verbose entries with reason and full `Msg.String()` trace; stdout output unchanged.
 - [x] **Strict boot sequence (Phase 38):** Synchronous initialization in `cmd/arx-dns/main.go` — config, zones/blocklists, root hints (with fallback), response cache, upstream pre-warm (forward mode), then `gnet` listeners; `Forwarder.PreWarm()` issues internal `arpa.` query; root hints fetch failure logs error and uses `config.DefaultRootHints()`.
+- [x] **Configurable root hints management (Phase 39):** `server.root_hints_file` (default `./named.root`) and `server.auto_update_root_hints` (default `true`); externally managed mode reads local file only with WARN fallback; auto-update mode preserves 30-day InterNIC refresh behavior.
