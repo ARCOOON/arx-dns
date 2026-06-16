@@ -108,11 +108,10 @@ type RecursiveConfig struct {
 	TrustedSubnets []string `toml:"trusted_subnets"`
 }
 
-// ResolverConfig selects recursive resolution strategy (forward vs iterative from root hints).
+// ResolverConfig selects recursive resolution strategy (forward vs iterative).
 type ResolverConfig struct {
-	Mode              string   `toml:"mode"`
-	RootHints         []string `toml:"root_hints"`
-	QNameMinimization bool     `toml:"qname_minimization"`
+	Mode              string `toml:"mode"`
+	QNameMinimization bool   `toml:"qname_minimization"`
 }
 
 // FirewallConfig controls DNS blocklist loading and block actions.
@@ -196,7 +195,6 @@ func Default() Config {
 		},
 		Resolver: ResolverConfig{
 			Mode:              defaultResolverMode,
-			RootHints:         DefaultRootHints(),
 			QNameMinimization: true,
 		},
 		Firewall: FirewallConfig{
@@ -228,14 +226,9 @@ func Load(path string) (Config, error) {
 	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		cfg := Default()
-		if err := cfg.EnsureDNSCookieSecret(path); err != nil {
-			return Config{}, fmt.Errorf("ensure dns cookie secret: %w", err)
-		}
-		if err := Write(path, cfg); err != nil {
+		if err := writeDefaultConfig(path); err != nil {
 			return Config{}, fmt.Errorf("create default config %q: %w", path, err)
 		}
-		return cfg, nil
 	}
 
 	data, err := os.ReadFile(path)
@@ -337,9 +330,6 @@ func (c *Config) applyDefaults() {
 	}
 	if strings.TrimSpace(c.Resolver.Mode) == "" {
 		c.Resolver.Mode = def.Resolver.Mode
-	}
-	if len(c.Resolver.RootHints) == 0 {
-		c.Resolver.RootHints = append([]string(nil), def.Resolver.RootHints...)
 	}
 }
 
@@ -677,46 +667,6 @@ func (c Config) validateResolver() error {
 		return fmt.Errorf("resolver.mode must be forward or iterative, got %q", c.Resolver.Mode)
 	}
 	return nil
-}
-
-// NormalizedRootHints returns root server addresses in host:port form.
-func (c Config) NormalizedRootHints() ([]string, error) {
-	hints := c.Resolver.RootHints
-	if len(hints) == 0 {
-		hints = DefaultRootHints()
-	}
-
-	out := make([]string, 0, len(hints))
-	for _, raw := range hints {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-
-		host, port, err := net.SplitHostPort(raw)
-		if err != nil {
-			if strings.Contains(err.Error(), "missing port") {
-				if net.ParseIP(raw) == nil {
-					return nil, fmt.Errorf("invalid root hint IP %q", raw)
-				}
-				out = append(out, net.JoinHostPort(raw, "53"))
-				continue
-			}
-			return nil, fmt.Errorf("invalid root hint %q: %w", raw, err)
-		}
-		if net.ParseIP(host) == nil {
-			return nil, fmt.Errorf("invalid root hint IP %q", host)
-		}
-		if port == "" {
-			return nil, fmt.Errorf("invalid root hint address %q", raw)
-		}
-		out = append(out, net.JoinHostPort(host, port))
-	}
-
-	if len(out) == 0 {
-		return nil, errors.New("at least one root hint is required for iterative resolution")
-	}
-	return out, nil
 }
 
 // NormalizedUpstreams returns upstream resolver addresses in host:port form.
