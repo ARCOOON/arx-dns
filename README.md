@@ -71,6 +71,7 @@ go build -tags noui -o arx-dns ./cmd/arx-dns/
 
 | Step | Action                    | Notes                                                                                                                                                                 |
 | ---- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Bootstrap environment     | Create `./data`, `./data/certs`, and `./zones` when missing; write embedded default `config.toml` when the target file does not exist                                 |
 | 1    | Load configuration        | TOML parse and validation                                                                                                                                             |
 | 2    | Load zones and blocklists | In-memory radix trees; synchronous initial load                                                                                                                       |
 | 3    | Fetch/load root hints     | Configurable `server.root_hints_file` path; optional InterNIC auto-update (`server.auto_update_root_hints`); falls back to 13 built-in IPv4 root addresses on failure |
@@ -177,7 +178,7 @@ docker build -t arx-dns:latest .
 
 ### Configuration
 
-All runtime settings are loaded from a single TOML file. The only CLI flag is `-config` (default: `./config.toml`). When the file does not exist, arx-dns writes a default configuration and continues startup.
+All runtime settings are loaded from a single TOML file. The only CLI flag is `-config` (default: `./config.toml`). On every startup, arx-dns creates missing runtime directories (`./data`, `./data/certs`, `./zones`). When the configuration file does not exist, arx-dns writes an embedded default TOML template and continues startup.
 
 | Flag      | Default         | Description                         |
 | --------- | --------------- | ----------------------------------- |
@@ -233,8 +234,8 @@ allowed_subnets = ['10.0.0.0/8', '192.168.0.0/16']
 notify_slaves = ['192.168.1.10', '192.168.1.11']
 
 [tls]
-cert_file = './certs/server.crt'
-key_file = './certs/server.key'
+cert_file = ''
+key_file = ''
 
 [listeners]
 dot = ':853'
@@ -243,9 +244,11 @@ doh = ':443'
 [api]
 listen = '127.0.0.1:8080'
 auth_token = 'dev-token-change-me'
-tls_cert = './certs/api.crt'
-tls_key = './certs/api.key'
+tls_cert = ''
+tls_key = ''
 ```
+
+Root hints for iterative resolution are not configured under `[resolver]`. They are fetched or loaded autonomously at runtime from `server.root_hints_file` (default `./named.root`) when `server.auto_update_root_hints` is `true` (default). Set `auto_update_root_hints = false` to use only a locally managed root hints file (Ansible, Puppet, etc.). Place TLS certificates in `./data/certs/` (created automatically on boot) and set `tls.cert_file` / `tls.key_file` (and optional `api.tls_cert` / `api.tls_key`) when enabling encrypted DNS or HTTPS management API.
 
 | Section / Key                    | Default                                       | Description                                                                                                                                                                            |
 | -------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
