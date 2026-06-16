@@ -69,12 +69,10 @@ type SecurityConfig struct {
 
 // ServerConfig controls the DNS listener bind address and reactor sizing.
 type ServerConfig struct {
-	Listen              string `toml:"listen"`
-	Port                int    `toml:"port"`
-	EventLoops          int    `toml:"event_loops"`
-	LogLevel            string `toml:"log_level"`
-	RootHintsFile       string `toml:"root_hints_file"`
-	AutoUpdateRootHints bool   `toml:"auto_update_root_hints"`
+	Listen     string `toml:"listen"`
+	Port       int    `toml:"port"`
+	EventLoops int    `toml:"event_loops"`
+	LogLevel   string `toml:"log_level"`
 }
 
 // TLSConfig holds the server certificate and private key for encrypted DNS transports.
@@ -110,8 +108,10 @@ type RecursiveConfig struct {
 
 // ResolverConfig selects recursive resolution strategy (forward vs iterative).
 type ResolverConfig struct {
-	Mode              string `toml:"mode"`
-	QNameMinimization bool   `toml:"qname_minimization"`
+	Mode                string `toml:"mode"`
+	QNameMinimization   bool   `toml:"qname_minimization"`
+	RootHintsFile       string `toml:"root_hints_file"`
+	AutoUpdateRootHints bool   `toml:"auto_update_root_hints"`
 }
 
 // FirewallConfig controls DNS blocklist loading and block actions.
@@ -138,7 +138,7 @@ const (
 	defaultECSIPv6PrefixLen  = 56
 	defaultResolverMode      = "forward"
 	defaultLogLevel          = "INFO"
-	defaultRootHintsFile     = "./named.root"
+	defaultRootHintsFile     = "./data/named.root"
 )
 
 // DefaultRootHints returns the 13 standard IPv4 root server addresses (RFC root hint set).
@@ -164,12 +164,10 @@ func DefaultRootHints() []string {
 func Default() Config {
 	return Config{
 		Server: ServerConfig{
-			Listen:              defaultListen,
-			Port:                defaultPort,
-			EventLoops:          0,
-			LogLevel:            defaultLogLevel,
-			RootHintsFile:       defaultRootHintsFile,
-			AutoUpdateRootHints: true,
+			Listen:     defaultListen,
+			Port:       defaultPort,
+			EventLoops: 0,
+			LogLevel:   defaultLogLevel,
 		},
 		Listeners: ListenersConfig{
 			DoT: defaultDoTListen,
@@ -194,8 +192,10 @@ func Default() Config {
 			},
 		},
 		Resolver: ResolverConfig{
-			Mode:              defaultResolverMode,
-			QNameMinimization: true,
+			Mode:                defaultResolverMode,
+			QNameMinimization:   true,
+			RootHintsFile:       defaultRootHintsFile,
+			AutoUpdateRootHints: true,
 		},
 		Firewall: FirewallConfig{
 			BlocklistsDirectory: defaultBlocklistsDir,
@@ -286,8 +286,8 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Server.LogLevel) == "" {
 		c.Server.LogLevel = def.Server.LogLevel
 	}
-	if strings.TrimSpace(c.Server.RootHintsFile) == "" {
-		c.Server.RootHintsFile = def.Server.RootHintsFile
+	if strings.TrimSpace(c.Resolver.RootHintsFile) == "" {
+		c.Resolver.RootHintsFile = def.Resolver.RootHintsFile
 	}
 	if strings.TrimSpace(c.Zones.Directory) == "" {
 		c.Zones.Directory = def.Zones.Directory
@@ -344,8 +344,8 @@ func (c Config) Validate() error {
 	if err := validateLogLevel(c.Server.LogLevel); err != nil {
 		return err
 	}
-	if strings.TrimSpace(c.Server.RootHintsFile) == "" {
-		return errors.New("server.root_hints_file must not be empty")
+	if strings.TrimSpace(c.Resolver.RootHintsFile) == "" {
+		return errors.New("resolver.root_hints_file must not be empty")
 	}
 	if strings.TrimSpace(c.Zones.Directory) == "" {
 		return errors.New("zones.directory must not be empty")
@@ -662,7 +662,7 @@ func (c Config) validateResolver() error {
 			return err
 		}
 	case "iterative":
-		// Root hints are loaded dynamically at runtime from server.root_hints_file.
+		// Root hints are loaded dynamically at runtime from resolver.root_hints_file.
 	default:
 		return fmt.Errorf("resolver.mode must be forward or iterative, got %q", c.Resolver.Mode)
 	}

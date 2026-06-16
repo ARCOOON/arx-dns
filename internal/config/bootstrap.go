@@ -14,8 +14,6 @@ listen = '0.0.0.0'
 port = 53
 event_loops = 0
 log_level = 'INFO'
-root_hints_file = './named.root'
-auto_update_root_hints = true
 
 [zones]
 directory = './zones'
@@ -27,6 +25,8 @@ trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
 [resolver]
 mode = 'forward'
 qname_minimization = true
+root_hints_file = './data/named.root'
+auto_update_root_hints = true
 
 [firewall]
 blocklists_directory = './blocklists'
@@ -75,6 +75,7 @@ var bootstrapDirectories = []string{
 	"./data",
 	"./data/certs",
 	"./zones",
+	"./blocklists",
 }
 
 // Bootstrap ensures runtime directories exist and writes the embedded default
