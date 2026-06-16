@@ -19,7 +19,7 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 // Server exposes a lightweight HTTP API for health checks, telemetry, zone management,
-// and the embedded management WebUI (//go:embed all:dist in ui/embed.go).
+// and optionally the embedded management WebUI when built with -tags webui.
 type Server struct {
 	cfg      config.Config
 	stats    *telemetry.Stats

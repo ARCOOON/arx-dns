@@ -1,3 +1,5 @@
+//go:build webui
+
 package api
 
 import (
@@ -65,17 +67,6 @@ func serveWebUIFile(w http.ResponseWriter, r *http.Request, name string) {
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
-}
-
-func isReservedWebPath(path string) bool {
-	switch {
-	case path == "health",
-		path == "metrics",
-		strings.HasPrefix(path, "api/"):
-		return true
-	default:
-		return false
-	}
 }
 
 func handleWebUI(w http.ResponseWriter, r *http.Request) {
