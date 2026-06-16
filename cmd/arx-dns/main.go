@@ -25,6 +25,12 @@ func main() {
 	configPath := flag.String("config", "./config.toml", "path to the TOML configuration file")
 	flag.Parse()
 
+	// Step 0: Bootstrap runtime directories and default configuration file.
+	if err := config.Bootstrap(*configPath); err != nil {
+		slog.Default().Error("failed to bootstrap runtime environment", "config", *configPath, "error", err)
+		os.Exit(1)
+	}
+
 	// Step 1: Load configuration.
 	cfg, err := config.Load(*configPath)
 	if err != nil {
