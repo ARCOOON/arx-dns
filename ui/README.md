@@ -53,4 +53,11 @@ Components are placed under `src/components/ui/`.
 
 ## Go embedding
 
-Production assets in `dist/` are embedded via `ui/embed.go` (`//go:embed all:dist`) and served by the management API at `/`.
+Production assets in `dist/` are embedded via `ui/embed_webui.go` (`//go:build webui`, `//go:embed all:dist`) and served by the management API at `/`. Core-only builds use `ui/embed_noui.go` (`//go:build !webui`) and do not require `dist/` to exist.
+
+Build with the project Makefile:
+
+```bash
+make build-full    # auto-builds ui/dist when sources change
+make build-core    # DNS server only, no WebUI
+```
