@@ -34,12 +34,12 @@
   - [x] Dynamic Updates (RFC 2136) secured via TSIG.
   - [x] Zone Transfers: Master/Slave replication via AXFR (RFC 5936) and incremental IXFR (RFC 1995) including `NOTIFY` (RFC 1996) (Phase 28).
 - [x] **Recursive / Resolver Mode:**
-  - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback and 2s timeout per upstream (Phase 07).
+  - [x] Upstream forwarding for queries outside local zones when RD is set, with sequential fallback, 2s timeout per upstream, and boot-time upstream pre-warm before port 53 bind (Phase 07, Phase 38).
   - [x] TTL-aware in-memory cache for recursive responses with hit/miss telemetry (Phase 08).
   - [x] ECS-aware cache keys for forwarded upstream responses (Phase 23).
   - [x] Negative Caching (RFC 2308) for `NXDOMAIN` and `NODATA` recursive responses (Phase 19).
   - [x] Full iterative resolution starting from root servers with delegation walking, glue/sub-query NS resolution, depth limit, and Ristretto cache integration (Phase 29).
-  - [x] Autonomous root hints fetcher: HTTP GET from InterNIC `named.root`, 30-day local cache (`./named.root`), A/AAAA parsing, and hybrid forward/iterative switch via `resolver.mode` (Phase 36).
+  - [x] Autonomous root hints fetcher: HTTP GET from InterNIC `named.root`, 30-day local cache (`./named.root`), A/AAAA parsing, built-in IPv4 fallback on fetch failure, and hybrid forward/iterative switch via `resolver.mode` (Phase 36, Phase 38).
   - [x] QNAME Minimization (RFC 7816) for enhanced privacy with SERVFAIL/REFUSED/timeout fallback and `qname_min_fallbacks` telemetry (Phase 30).
 - [x] **Caching Engine:**
   - [x] Thread-safe, in-memory caching with strict TTL enforcement for forwarded upstream responses (Phase 08, Ristretto).
@@ -117,3 +117,4 @@
 - [x] **arx-tester pool drain fix (Phase 37.3):** Target successes reduced to 20 per permutation; workers exit immediately after recording a valid result (preventing post-success domain pops); `[FAILOVER]` stdout includes permutation label and explicit technical reason (Go network error or `dns.RcodeToString`).
 - [x] **arx-tester global stats (Phase 37.4):** Thread-safe `sync/atomic` counters for total queries fired, failovers triggered, success-with-data, and success-empty/NXDOMAIN; consolidated execution summary block printed at program end with permutation count, domain pool consumption, and outcome totals.
 - [x] **arx-tester smart logging (Phase 37.5):** In-memory `sync.Mutex`-protected log buffer with deferred file write; execution summary prepended at top of log file; success queries log concise one-line entries (domain, type/transport, Rcode, answer summary, RTT); failure/failover queries log verbose entries with reason and full `Msg.String()` trace; stdout output unchanged.
+- [x] **Strict boot sequence (Phase 38):** Synchronous initialization in `cmd/arx-dns/main.go` — config, zones/blocklists, root hints (with fallback), response cache, upstream pre-warm (forward mode), then `gnet` listeners; `Forwarder.PreWarm()` issues internal `arpa.` query; root hints fetch failure logs error and uses `config.DefaultRootHints()`.
