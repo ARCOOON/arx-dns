@@ -4,6 +4,7 @@
 
 - [x] **Devcontainer:** Production-ready `.devcontainer/` with Go bookworm image, DNS utilities, port 53 UDP/TCP forwarding, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities.
 - [x] **Docker deployment (Phase 13):** Multi-stage `Dockerfile` (`golang:bookworm` builder, `scratch` runtime, `CGO_ENABLED=0`), `docker-compose.yml` with ports 53 UDP/TCP, 853 TCP (DoT), and 443 TCP (DoH), host `data/` volume mounts including `./data/certs`, `unless-stopped` restart, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities; Buildx-ready for `linux/amd64` and `linux/arm64`.
+- [x] **Smart build pipeline (Phase 40):** Root `Makefile` with `build-core` (`-tags noui`), `build-full` (`-tags webui`, depends on `ui/dist`), `build-tester`, cross-compilation matrix (`release-core`, `release-full`, `release-tester` for linux/windows/darwin × amd64/arm64 → `bin/`), conditional WebUI embedding via build tags (`ui/embed_webui.go`, `internal/api/webui_enabled.go` vs stub variants), `clean`, and awk-parsed `help` target.
 
 ## 1. Network Layer & Core I/O
 
@@ -98,7 +99,7 @@
   - [x] Zone listing and authenticated record create/delete with BIND `.zone` file persistence (Phase 17).
   - [x] Advanced record types (`MX`, `TXT`, `SRV`) with validation and BIND zone re-writer support (Phase 18).
   - [x] API TLS (HTTPS) and audit logging for `POST`/`DELETE` mutations (Phase 18).
-  - [x] Management WebUI scaffold: Vue 3 + Vite + TypeScript + shadcn-vue (radix-vue), OKLCH theme, Google Fonts typography, `ui/dist` embedded via `//go:embed`, SPA routing fallback on management API listener (Phase 32).
+  - [x] Management WebUI scaffold: Vue 3 + Vite + TypeScript + shadcn-vue (radix-vue), OKLCH theme, Google Fonts typography, conditional `ui/dist` embedding via `-tags webui`, SPA routing fallback on management API listener (Phase 32, Phase 40).
   - [x] Dashboard view with live `GET /api/v1/stats` polling, Bearer-token API client, Vite dev proxy, flat sidebar layout shell, and metric cards (Phase 33, Phase 35).
 
 - [x] **Internal Telemetry (Phase 02):** Lock-free `sync/atomic` counters for query totals, UDP/TCP split, dropped packets, REFUSED answers, ACL rejections, forwarded queries, upstream failures, cache hits/misses, negative cache hits, truncated UDP responses, TCP read timeouts, firewall-blocked queries, DNSSEC validation pass/fail counters, RRL-dropped queries, DNS Cookie verified/rejected counters, ECS-forwarded query counter, AXFR completed/refused counters, NOTIFY sent/failed counters, QNAME minimization fallback counter, and RTT registry size (`rtt_tracked_ips`) (JSON-serializable snapshot for future API).

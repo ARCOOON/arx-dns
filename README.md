@@ -26,14 +26,43 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                                                                                                                                                                                 |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                                                                                                                                                                                      |
 | `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, embedded WebUI, and zone parameter validation                                                                                                                                                                                                                        |
-| `ui/`                 | Vue 3 + Vite + TypeScript management WebUI (shadcn-vue / radix-vue); production build in `ui/dist/` embedded into the binary via `//go:embed`                                                                                                                                                                                                                                       |
+| `ui/`                 | Vue 3 + Vite + TypeScript management WebUI (shadcn-vue / radix-vue); production build in `ui/dist/` embedded via `-tags webui` (`ui/embed_webui.go`)                                                                                                                                                                                                                                |
 
 ## Build & Run
 
+The project ships a `Makefile` with core-only and full (WebUI-embedded) build targets, cross-compilation releases, and smart WebUI dependency tracking.
+
 ```bash
-cd ui && npm install && npm run build && cd ..
-go build -o arx-dns ./cmd/arx-dns/
+make help          # list all targets
+make build-core    # arx-dns without embedded WebUI (-tags noui)
+make build-full    # arx-dns with embedded WebUI (-tags webui; auto-builds ui/dist)
+make build-tester  # arx-tester compliance CLI
+make clean         # remove bin/, ui/dist/, ui/node_modules/, local binaries
+```
+
+| Target           | Output                       | Build tags | WebUI                         |
+| ---------------- | ---------------------------- | ---------- | ----------------------------- |
+| `build-core`     | `./arx-dns`                  | `noui`     | Disabled (`GET /` → 404 text) |
+| `build-full`     | `./arx-dns`                  | `webui`    | Embedded from `ui/dist/`      |
+| `build-tester`   | `./arx-tester`               | _(none)_   | N/A                           |
+| `release-core`   | `bin/arx-dns-<os>-<arch>`    | `noui`     | Disabled                      |
+| `release-full`   | `bin/arx-dns-<os>-<arch>`    | `webui`    | Embedded                      |
+| `release-tester` | `bin/arx-tester-<os>-<arch>` | _(none)_   | N/A                           |
+
+Cross-compilation covers `linux`, `windows`, and `darwin` on `amd64` and `arm64`. Windows binaries receive a `.exe` suffix.
+
+Manual build (equivalent to `make build-full`):
+
+```bash
+make ui/dist
+go build -tags webui -o arx-dns ./cmd/arx-dns/
 ./arx-dns   # reads ./config.toml (auto-created with defaults on first run)
+```
+
+Core-only manual build (no `ui/dist` required):
+
+```bash
+go build -tags noui -o arx-dns ./cmd/arx-dns/
 ```
 
 ### Boot Sequence
@@ -70,7 +99,7 @@ go build -o arx-tester ./cmd/arx-tester/
 
 Stdout prints one-line summaries with Rcode detail, for example `[OK] google.com (A/udp) - NOERROR (2 answers)` or `[FAILOVER] bad.example (SRV/udp/DNSSEC+EDNS) -> Reason: SERVFAIL`. The trace log is written once at program exit: the `ARX-TESTER: EXECUTION SUMMARY` block appears first, followed by per-query entries. Successful queries (`NOERROR`, `NXDOMAIN`) log a single concise line with answer summary and RTT; failures and failovers log the full `Msg.String()` diagnostic trace. Real-time stdout output is unchanged.
 
-The management WebUI is compiled to `ui/dist/` and embedded into the binary. Run `npm run build` in `ui/` before `go build` when the frontend changes. Docker builds compile the UI automatically in the builder stage.
+The management WebUI is compiled to `ui/dist/` and embedded into the binary when built with `-tags webui` (`make build-full` or `make release-full`). Core-only builds (`make build-core`, `-tags noui`) skip the frontend entirely and return a plain-text 404 on `/`. Docker builds compile the UI automatically in the builder stage with `-tags webui`.
 
 ### WebUI Development
 
@@ -611,16 +640,16 @@ curl -s http://127.0.0.1:8080/metrics
 
 A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication, optional TLS, structured audit logging for mutations, strict zone-name validation on record endpoints, and an embedded Vue 3 management WebUI served from `/` without authentication.
 
-| Endpoint                       | Method | Auth   | Description                                                                       |
-| ------------------------------ | ------ | ------ | --------------------------------------------------------------------------------- |
-| `/`                            | GET    | None   | Embedded management WebUI (Vue SPA); client-side routes fall back to `index.html` |
-| `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                         |
-| `/metrics`                     | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                      |
-| `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                                   |
-| `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)               |
-| `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                                |
-| `/api/v1/zones/{zone}/records` | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file          |
-| `/api/v1/zones/{zone}/records` | DELETE | Bearer | Remove a matching DNS record from the zone; persists to the BIND `.zone` file     |
+| Endpoint                       | Method | Auth   | Description                                                                                 |
+| ------------------------------ | ------ | ------ | ------------------------------------------------------------------------------------------- |
+| `/`                            | GET    | None   | Embedded management WebUI when built with `-tags webui`; plain-text 404 in core-only builds |
+| `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                                   |
+| `/metrics`                     | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                                |
+| `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                                             |
+| `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)                         |
+| `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                                          |
+| `/api/v1/zones/{zone}/records` | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file                    |
+| `/api/v1/zones/{zone}/records` | DELETE | Bearer | Remove a matching DNS record from the zone; persists to the BIND `.zone` file               |
 
 Record create/delete payloads use JSON:
 
