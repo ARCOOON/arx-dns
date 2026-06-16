@@ -253,6 +253,28 @@ func (f *Forwarder) SetECS(enabled bool, ipv4PrefixLen, ipv6PrefixLen uint8) {
 	f.ecsIPv6PrefixLen = ipv6PrefixLen
 }
 
+// PreWarm issues a lightweight recursive query through configured upstreams to
+// initialize the DNS client and establish early connectivity before listeners start.
+func (f *Forwarder) PreWarm() error {
+	if f == nil || len(f.upstreams) == 0 {
+		return ErrAllUpstreamsFailed
+	}
+
+	req := new(mdns.Msg)
+	req.SetQuestion("arpa.", mdns.TypeNS)
+	req.RecursionDesired = true
+
+	_, err := f.Exchange(req, netip.IPv6Loopback())
+	if err != nil {
+		return fmt.Errorf("upstream pre-warm: %w", err)
+	}
+
+	if f.logger != nil {
+		f.logger.Info("upstream pre-warm completed", "upstreams", f.upstreams)
+	}
+	return nil
+}
+
 // PrepareUpstreamRequest returns the upstream query with EDNS options applied.
 func (f *Forwarder) PrepareUpstreamRequest(req *mdns.Msg, client netip.Addr) *mdns.Msg {
 	if f == nil {

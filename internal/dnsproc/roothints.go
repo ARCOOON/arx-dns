@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -36,6 +37,32 @@ func SetRootHintsFetchURLForTest(url string) {
 		return
 	}
 	rootHintsFetchURL = url
+}
+
+// LoadRootHints returns root server addresses from cachePath or InterNIC.
+// On any failure it logs the error and returns normalized fallback addresses so
+// the engine can still serve local zones without internet at boot.
+func LoadRootHints(cachePath string, fallback []string, logger *slog.Logger) []string {
+	hints, err := FetchOrLoadRootHints(cachePath)
+	if err == nil {
+		return hints
+	}
+
+	if logger != nil {
+		logger.Error("failed to load root hints, using built-in fallback",
+			"cache", cachePath,
+			"error", err,
+		)
+	}
+
+	normalized, normErr := NormalizeUpstreams(fallback)
+	if normErr != nil || len(normalized) == 0 {
+		if logger != nil {
+			logger.Error("built-in root hints fallback is invalid", "error", normErr)
+		}
+		return nil
+	}
+	return normalized
 }
 
 // FetchOrLoadRootHints returns root server addresses from cachePath when the file
