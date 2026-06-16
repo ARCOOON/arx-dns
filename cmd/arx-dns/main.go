@@ -25,6 +25,7 @@ func main() {
 	configPath := flag.String("config", "./config.toml", "path to the TOML configuration file")
 	flag.Parse()
 
+	// Step 1: Load configuration.
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Default().Error("failed to load configuration", "config", *configPath, "error", err)
@@ -41,6 +42,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Step 2: Load zones and blocklists.
 	store := storage.NewMemory()
 	storage.LoadZones(cfg.Zones, store, logger)
 
@@ -53,11 +55,15 @@ func main() {
 	fw := firewall.New(fwAction)
 	firewall.Load(cfg.Firewall, fw, logger)
 
-	if err := firewall.StartWatcher(ctx, cfg.Firewall, fw, logger); err != nil {
-		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
+	// Step 3: Fetch/load root hints (falls back to built-in addresses on failure).
+	const rootHintsCachePath = "./named.root"
+	rootHints := dnsproc.LoadRootHints(rootHintsCachePath, config.DefaultRootHints(), logger)
+	if len(rootHints) == 0 {
+		logger.Error("no root hints available after fetch and fallback", "cache", rootHintsCachePath)
 		os.Exit(1)
 	}
 
+	// Step 4: Initialize response cache and shared runtime services.
 	stats := telemetry.New()
 
 	responseCache, err := storage.NewResponseCache(logger)
@@ -85,25 +91,22 @@ func main() {
 	}
 	notifier := dnsproc.NewNotifier(cfg.XFR.Enabled, notifySlaves, cfg.ListenAddress(), stats, logger)
 
-	const rootHintsCachePath = "./named.root"
-
+	// Step 5: Initialize resolver and pre-warm upstream connections.
 	var forwarder *dnsproc.Forwarder
 	var iterative *dnsproc.IterativeResolver
 
 	switch cfg.ResolverMode() {
 	case "forward":
-		var err error
 		forwarder, err = dnsproc.NewForwarderFromConfig(cfg, stats, logger)
 		if err != nil {
 			logger.Error("invalid upstream configuration", "upstreams", cfg.Recursive.Upstreams, "error", err)
 			os.Exit(1)
 		}
-	case "iterative":
-		rootHints, err := dnsproc.FetchOrLoadRootHints(rootHintsCachePath)
-		if err != nil {
-			logger.Error("failed to load root hints", "cache", rootHintsCachePath, "error", err)
+		if err := forwarder.PreWarm(); err != nil {
+			logger.Error("upstream pre-warm failed", "upstreams", cfg.Recursive.Upstreams, "error", err)
 			os.Exit(1)
 		}
+	case "iterative":
 		iterative, err = dnsproc.NewIterativeFromConfig(cfg, rootHints, stats, logger)
 		if err != nil {
 			logger.Error("invalid iterative resolver configuration", "root_hints", rootHints, "error", err)
@@ -126,6 +129,11 @@ func main() {
 
 	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
 
+	if err := firewall.StartWatcher(ctx, cfg.Firewall, fw, logger); err != nil {
+		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
+		os.Exit(1)
+	}
+
 	if err := storage.StartWatcher(ctx, cfg.Zones, store, logger, func() {
 		notifier.NotifyZones(dnsproc.ZoneOrigins(store.ListZones()))
 	}); err != nil {
@@ -136,6 +144,7 @@ func main() {
 	rrl := network.NewRateLimiter(cfg.RateLimit, stats)
 	defer rrl.Close()
 
+	// Step 6: Start listeners (reactors bind to port 53 only after steps 1-5 succeed).
 	reactors := network.NewReactors(cfg, logger, stats, proc, rrl)
 
 	var wg sync.WaitGroup
@@ -163,6 +172,7 @@ func main() {
 		"upstreams", cfg.Recursive.Upstreams,
 		"resolver_mode", cfg.ResolverMode(),
 		"root_hints_cache", rootHintsCachePath,
+		"root_hints_count", len(rootHints),
 		"trusted_subnets", cfg.Recursive.TrustedSubnets,
 		"blocklists", cfg.Firewall.BlocklistsDirectory,
 		"block_action", fwAction,
