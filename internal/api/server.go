@@ -21,16 +21,17 @@ const shutdownTimeout = 10 * time.Second
 // Server exposes a lightweight HTTP API for health checks, telemetry, zone management,
 // and optionally the embedded management WebUI when built with -tags webui.
 type Server struct {
-	cfg      config.Config
-	stats    *telemetry.Stats
-	store    *storage.Memory
-	notifier dnsproc.ZoneChangeNotifier
-	logger   *slog.Logger
-	server   *http.Server
+	cfg         config.Config
+	stats       *telemetry.Stats
+	telemetryDB *telemetry.DB
+	store       *storage.Memory
+	notifier    dnsproc.ZoneChangeNotifier
+	logger      *slog.Logger
+	server      *http.Server
 }
 
 // New creates a management API server bound to cfg.API.Listen.
-func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, notifier dnsproc.ZoneChangeNotifier, logger *slog.Logger) *Server {
+func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, store *storage.Memory, notifier dnsproc.ZoneChangeNotifier, logger *slog.Logger) *Server {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -39,11 +40,12 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, notif
 	}
 
 	s := &Server{
-		cfg:      cfg,
-		stats:    stats,
-		store:    store,
-		notifier: notifier,
-		logger:   logger,
+		cfg:         cfg,
+		stats:       stats,
+		telemetryDB: telemetryDB,
+		store:       store,
+		notifier:    notifier,
+		logger:      logger,
 	}
 
 	mux := http.NewServeMux()
@@ -52,6 +54,7 @@ func New(cfg config.Config, stats *telemetry.Stats, store *storage.Memory, notif
 
 	auth := bearerAuth(cfg.API.AuthToken)
 	mux.Handle("GET /api/v1/stats", auth(http.HandlerFunc(s.handleStats)))
+	mux.Handle("GET /api/v1/stats/history", auth(http.HandlerFunc(s.handleStatsHistory)))
 	mux.Handle("GET /api/v1/zones", auth(http.HandlerFunc(s.handleListZones)))
 	mux.Handle("POST /api/v1/zones/reload", auth(http.HandlerFunc(s.handleZonesReload)))
 	mux.Handle("POST /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleCreateRecord)))
@@ -129,10 +132,6 @@ func bearerAuth(token string) func(http.Handler) http.Handler {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func (s *Server) handleStats(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.stats.Snapshot())
 }
 
 func (s *Server) handleZonesReload(w http.ResponseWriter, _ *http.Request) {
