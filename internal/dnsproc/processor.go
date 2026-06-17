@@ -165,6 +165,10 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 		}
 	}
 
+	if p.stats != nil {
+		p.stats.IncLocalQuery()
+	}
+
 	resp := new(mdns.Msg)
 	resp.SetReply(req)
 	resp.Authoritative = true
@@ -250,6 +254,7 @@ func (p *Processor) recursiveQuery(req *mdns.Msg, client netip.Addr, limitUDP bo
 		if cached, ok := p.cache.Get(key); ok {
 			if p.stats != nil {
 				p.stats.IncCacheHit()
+				p.stats.IncLocalQuery()
 				if storage.IsNegativeResponse(cached) {
 					p.stats.IncNegativeCacheHit()
 				}
@@ -261,6 +266,10 @@ func (p *Processor) recursiveQuery(req *mdns.Msg, client netip.Addr, limitUDP bo
 		if p.stats != nil {
 			p.stats.IncCacheMiss()
 		}
+	}
+
+	if p.stats != nil {
+		p.stats.IncUpstreamQuery()
 	}
 
 	resp, err := resolver.Exchange(req, client)
