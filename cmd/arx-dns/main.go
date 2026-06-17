@@ -73,8 +73,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Step 4: Initialize response cache and shared runtime services.
+	// Step 4: Initialize response cache, telemetry databases, and shared runtime services.
 	stats := telemetry.New()
+
+	telemetryDB, err := telemetry.OpenDB("./data")
+	if err != nil {
+		logger.Error("failed to open telemetry databases", "error", err)
+		os.Exit(1)
+	}
+	defer telemetryDB.Close()
+
+	telemetry.StartWorkers(ctx, stats, telemetryDB, logger)
 
 	responseCache, err := storage.NewResponseCache(logger)
 	if err != nil {
@@ -198,7 +207,7 @@ func main() {
 		"xfr_allowed_subnets", cfg.XFR.AllowedSubnets,
 		"notify_slaves", cfg.XFR.NotifySlaves,
 	)
-	apiServer := api.New(cfg, stats, store, notifier, logger)
+	apiServer := api.New(cfg, stats, telemetryDB, store, notifier, logger)
 	startService("api", apiServer.Run)
 	startService("udp", reactors.UDP.Run)
 	startService("tcp", reactors.TCP.Run)
