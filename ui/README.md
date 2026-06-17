@@ -7,6 +7,7 @@ Vue 3 management console for arx-dns. Embedded into the Go binary at build time.
 - Vue 3 + TypeScript + Vite
 - Tailwind CSS v4
 - shadcn-vue (radix-vue primitives)
+- chart.js + vue-chartjs (Dashboard live line charts)
 - OKLCH theme tokens (light/dark)
 - Noto Sans (headings) + Source Sans 3 (body) via Google Fonts
 
@@ -14,6 +15,7 @@ Vue 3 management console for arx-dns. Embedded into the Go binary at build time.
 
 ```bash
 npm install
+npm install chart.js vue-chartjs   # required for Dashboard live charts
 npm run dev      # http://127.0.0.1:5173
 npm run build    # outputs to dist/ (required before go build)
 ```
@@ -28,20 +30,20 @@ The API client (`src/api/client.ts`) reads `localStorage.getItem('arx_token')` a
 
 ## Layout and views
 
-| Path          | View       | Description                                               |
-| ------------- | ---------- | --------------------------------------------------------- |
-| `/`           | Dashboard  | Live telemetry cards polling `GET /api/v1/stats` every 2s |
-| `/zones`      | Zones      | Placeholder for zone management                           |
-| `/blocklists` | Blocklists | Placeholder for blocklist management                      |
-| `/settings`   | Settings   | Placeholder for server settings                           |
-| `/login`      | Login      | Bearer token entry (public route)                         |
+| Path          | View       | Description                                                                                                                                                                                                                                                                                                                                                 |
+| ------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`           | Dashboard  | Live telemetry cards (Total Queries with Local · Upstream breakdown and ratio bar), responsive `sm:grid-cols-2 xl:grid-cols-4` stat grid, time-window controls (Live / 5m / 1h / 30d), and rolling QPS / cache-hit charts with `HH:MM:SS` x-axis timestamps; Live mode polls `GET /api/v1/stats` every 2s, historical windows fetch once from SQLite rollup |
+| `/zones`      | Zones      | Placeholder for zone management                                                                                                                                                                                                                                                                                                                             |
+| `/blocklists` | Blocklists | Placeholder for blocklist management                                                                                                                                                                                                                                                                                                                        |
+| `/settings`   | Settings   | Placeholder for server settings                                                                                                                                                                                                                                                                                                                             |
+| `/login`      | Login      | Bearer token entry (public route)                                                                                                                                                                                                                                                                                                                           |
 
 ## API modules
 
-| Module              | Purpose                                                   |
-| ------------------- | --------------------------------------------------------- |
-| `src/api/client.ts` | Generic `fetch` wrapper with Bearer auth and 401 handling |
-| `src/api/stats.ts`  | `StatsSnapshot` types and `fetchStats()` helper           |
+| Module              | Purpose                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `src/api/client.ts` | Generic `fetch` wrapper with Bearer auth and 401 handling                            |
+| `src/api/stats.ts`  | `StatsSnapshot` / `StatsHistoryPoint` types, `fetchStats()`, and `getStatsHistory()` |
 
 ## Adding components
 

@@ -82,3 +82,77 @@ export async function apiRequest<T>(
 
   return (await response.json()) as T
 }
+
+export interface ZoneInfo {
+  origin: string
+  view: 'public' | 'internal'
+  file_path: string
+  records: number
+}
+
+export interface ZoneRecord {
+  id: string
+  name: string
+  type: string
+  ttl: number
+  value: string
+}
+
+export interface ZonesListResponse {
+  zones: ZoneInfo[]
+}
+
+export interface ZoneRecordsResponse {
+  zone: string
+  view: 'public' | 'internal'
+  records: ZoneRecord[]
+}
+
+export interface CreateRecordPayload {
+  name: string
+  type: string
+  ttl?: number
+  value: string
+  view?: 'public' | 'internal'
+}
+
+function zonePath(origin: string): string {
+  const apex = origin.replace(/\.$/, '')
+  return encodeURIComponent(apex)
+}
+
+export function fetchZones(): Promise<ZonesListResponse> {
+  return apiRequest<ZonesListResponse>('/api/v1/zones')
+}
+
+export function fetchZoneRecords(
+  origin: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<ZoneRecordsResponse> {
+  const params = new URLSearchParams({ view })
+  return apiRequest<ZoneRecordsResponse>(
+    `/api/v1/zones/${zonePath(origin)}/records?${params.toString()}`,
+  )
+}
+
+export function createZoneRecord(
+  origin: string,
+  payload: CreateRecordPayload,
+): Promise<{ status: string; message: string }> {
+  return apiRequest(`/api/v1/zones/${zonePath(origin)}/records`, {
+    method: 'POST',
+    body: payload,
+  })
+}
+
+export function deleteZoneRecord(
+  origin: string,
+  recordId: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<{ status: string; message: string }> {
+  const params = new URLSearchParams({ view })
+  return apiRequest(
+    `/api/v1/zones/${zonePath(origin)}/records/${encodeURIComponent(recordId)}?${params.toString()}`,
+    { method: 'DELETE' },
+  )
+}

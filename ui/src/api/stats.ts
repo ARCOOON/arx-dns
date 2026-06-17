@@ -13,6 +13,8 @@ export interface StatsSnapshot {
   authoritative_answers: number
   nxdomain_answers: number
   forwarded_queries: number
+  local_queries: number
+  upstream_queries: number
   upstream_failures: number
   cache_hits: number
   cache_misses: number
@@ -37,4 +39,25 @@ export interface StatsSnapshot {
 
 export function fetchStats(): Promise<StatsSnapshot> {
   return apiRequest<StatsSnapshot>('/api/v1/stats')
+}
+
+export interface StatsHistoryPoint {
+  timestamp: string
+  queries: number
+  cache_hits: number
+  dropped: number
+  dnssec_fails: number
+  local_queries: number
+  upstream_queries: number
+}
+
+export interface StatsHistoryResponse {
+  window: string
+  granularity: string
+  points: StatsHistoryPoint[]
+}
+
+export function getStatsHistory(range: string): Promise<StatsHistoryResponse> {
+  const params = new URLSearchParams({ range })
+  return apiRequest<StatsHistoryResponse>(`/api/v1/stats/history?${params.toString()}`)
 }
