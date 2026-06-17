@@ -43,6 +43,8 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "authoritative_answers_total", help: "Total number of authoritative NOERROR or NODATA responses sent.", load: func(s Snapshot) float64 { return float64(s.AuthoritativeAnswers) }},
 		{name: "nxdomain_answers_total", help: "Total number of NXDOMAIN DNS responses sent.", load: func(s Snapshot) float64 { return float64(s.NXDomainAnswers) }},
 		{name: "forwarded_queries_total", help: "Total number of recursive queries forwarded upstream.", load: func(s Snapshot) float64 { return float64(s.ForwardedQueries) }},
+		{name: "local_queries_total", help: "Total number of queries answered locally (cache, zone data, or AD optimization).", load: func(s Snapshot) float64 { return float64(s.LocalQueries) }},
+		{name: "upstream_queries_total", help: "Total number of recursive queries handed off to a forwarder or iterative resolver.", load: func(s Snapshot) float64 { return float64(s.UpstreamQueries) }},
 		{name: "upstream_failures_total", help: "Total number of recursive queries where all upstreams failed.", load: func(s Snapshot) float64 { return float64(s.UpstreamFailures) }},
 		{name: "cache_hits_total", help: "Total number of forwarded queries served from the response cache.", load: func(s Snapshot) float64 { return float64(s.CacheHits) }},
 		{name: "cache_misses_total", help: "Total number of forwarded queries that missed the response cache.", load: func(s Snapshot) float64 { return float64(s.CacheMisses) }},

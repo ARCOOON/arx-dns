@@ -19,6 +19,8 @@ type Stats struct {
 	authoritativeAnswers    atomic.Uint64
 	nxdomainAnswers         atomic.Uint64
 	forwardedQueries        atomic.Uint64
+	localQueries            atomic.Uint64
+	upstreamQueries         atomic.Uint64
 	upstreamFailures        atomic.Uint64
 	cacheHits               atomic.Uint64
 	cacheMisses             atomic.Uint64
@@ -60,6 +62,8 @@ type Snapshot struct {
 	AuthoritativeAnswers    uint64 `json:"authoritative_answers"`
 	NXDomainAnswers         uint64 `json:"nxdomain_answers"`
 	ForwardedQueries        uint64 `json:"forwarded_queries"`
+	LocalQueries            uint64 `json:"local_queries"`
+	UpstreamQueries         uint64 `json:"upstream_queries"`
 	UpstreamFailures        uint64 `json:"upstream_failures"`
 	CacheHits               uint64 `json:"cache_hits"`
 	CacheMisses             uint64 `json:"cache_misses"`
@@ -97,6 +101,8 @@ func (s *Stats) Snapshot() Snapshot {
 		AuthoritativeAnswers:    s.authoritativeAnswers.Load(),
 		NXDomainAnswers:         s.nxdomainAnswers.Load(),
 		ForwardedQueries:        s.forwardedQueries.Load(),
+		LocalQueries:            s.localQueries.Load(),
+		UpstreamQueries:         s.upstreamQueries.Load(),
 		UpstreamFailures:        s.upstreamFailures.Load(),
 		CacheHits:               s.cacheHits.Load(),
 		CacheMisses:             s.cacheMisses.Load(),
@@ -177,6 +183,14 @@ func (s *Stats) IncNXDomainAnswer() {
 
 func (s *Stats) IncForwardedQuery() {
 	s.forwardedQueries.Add(1)
+}
+
+func (s *Stats) IncLocalQuery() {
+	s.localQueries.Add(1)
+}
+
+func (s *Stats) IncUpstreamQuery() {
+	s.upstreamQueries.Add(1)
 }
 
 func (s *Stats) IncUpstreamFailure() {
