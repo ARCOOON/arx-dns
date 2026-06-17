@@ -110,7 +110,9 @@ npm install
 npm run dev    # Vite dev server (default http://127.0.0.1:5173)
 ```
 
-Stack: Vue 3, TypeScript, Vite, Tailwind CSS v4, shadcn-vue (radix-vue primitives), OKLCH theme tokens, Noto Sans headings, Source Sans 3 body text. Add components with `npx shadcn-vue@latest add <component>`.
+Stack: Vue 3, TypeScript, Vite, Tailwind CSS v4, shadcn-vue (radix-vue primitives), chart.js + vue-chartjs (Dashboard QPS and cache-hit line charts; live polling or SQLite-backed historical windows: Live / 5m / 1h / 30d; x-axis formats `HH:MM:SS`, `HH:MM`, or `DD.MM.`), OKLCH theme tokens, Noto Sans headings, Source Sans 3 body text. Add components with `npx shadcn-vue@latest add <component>`.
+
+The **Zones** view (`/zones`) provides a split layout: zone list sidebar (public/internal views) and a record table for the selected zone. Use **Add Record** to open a Dialog modal (Name, Type, Value, TTL) and the row delete action to remove records by stable API `id`.
 
 During `npm run dev`, Vite proxies `/api` to `http://127.0.0.1:8080` so the WebUI can call the management API without CORS issues. Store the API bearer token in `localStorage` under the key `arx_token` (the login screen sets this automatically).
 
@@ -573,6 +575,8 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `authoritative_answers`     | Authoritative NOERROR / NODATA responses                                |
 | `nxdomain_answers`          | NXDOMAIN responses sent                                                 |
 | `forwarded_queries`         | Recursive queries successfully forwarded upstream                       |
+| `local_queries`             | Queries answered locally (cache, zone data, or AD optimization)         |
+| `upstream_queries`          | Recursive queries handed off to a forwarder or iterative resolver       |
 | `upstream_failures`         | Recursive queries where all upstreams failed                            |
 | `cache_hits`                | Forwarded queries served from the response cache                        |
 | `cache_misses`              | Forwarded queries that missed the response cache                        |
@@ -590,6 +594,51 @@ Plain UDP/TCP on port 53 continues to work when TLS paths are omitted from `conf
 | `rtt_tracked_ips`           | Current number of upstream nameserver IPs in the RTT registry           |
 
 `Stats.Snapshot()` and `Stats.MarshalJSON()` produce JSON-ready structs exposed via the management API (`GET /api/v1/stats`). The same counters are exported in Prometheus text format at `GET /metrics` (no authentication required).
+
+### SQLite telemetry persistence
+
+A background worker in `internal/telemetry` samples the atomic counters every 60 seconds, computes per-interval deltas, and inserts them into `data/state.db` (`metrics_rollup` table). An hourly retention job deletes rows older than 30 days. Both `data/state.db` and placeholder `data/main.db` use WAL journal mode and `synchronous=NORMAL` for concurrent writes. The pure-Go driver (`modernc.org/sqlite`) keeps `CGO_ENABLED=0` cross-compilation intact.
+
+Install the dependency before building:
+
+```bash
+go get modernc.org/sqlite
+```
+
+Historical charts query aggregated buckets via `GET /api/v1/stats/history`:
+
+| Query parameter | Values | Aggregation                                              |
+| --------------- | ------ | -------------------------------------------------------- |
+| `range`         | `5m`   | Per-minute sums for the last 5 minutes                   |
+| `range`         | `1h`   | Per-minute sums for the last hour (default when omitted) |
+| `range`         | `30d`  | Per-day sums for the last 30 days                        |
+
+The legacy `window` query parameter is accepted as an alias for `range`.
+
+```bash
+curl -s -H 'Authorization: Bearer dev-token-change-me' \
+  'http://127.0.0.1:8080/api/v1/stats/history?range=1h'
+```
+
+Example response:
+
+```json
+{
+  "window": "1h",
+  "granularity": "minute",
+  "points": [
+    {
+      "timestamp": "2026-06-16T12:00:00Z",
+      "queries": 120,
+      "cache_hits": 84,
+      "dropped": 2,
+      "dnssec_fails": 0,
+      "local_queries": 96,
+      "upstream_queries": 24
+    }
+  ]
+}
+```
 
 ### Prometheus metrics
 
@@ -643,16 +692,19 @@ curl -s http://127.0.0.1:8080/metrics
 
 A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It uses the standard library `net/http` multiplexer with Bearer token authentication, optional TLS, structured audit logging for mutations, strict zone-name validation on record endpoints, and an embedded Vue 3 management WebUI served from `/` without authentication.
 
-| Endpoint                       | Method | Auth   | Description                                                                                 |
-| ------------------------------ | ------ | ------ | ------------------------------------------------------------------------------------------- |
-| `/`                            | GET    | None   | Embedded management WebUI when built with `-tags webui`; plain-text 404 in core-only builds |
-| `/health`                      | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                                   |
-| `/metrics`                     | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                                |
-| `/api/v1/stats`                | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters                                             |
-| `/api/v1/zones`                | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)                         |
-| `/api/v1/zones/reload`         | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                                          |
-| `/api/v1/zones/{zone}/records` | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file                    |
-| `/api/v1/zones/{zone}/records` | DELETE | Bearer | Remove a matching DNS record from the zone; persists to the BIND `.zone` file               |
+| Endpoint                            | Method | Auth   | Description                                                                                         |
+| ----------------------------------- | ------ | ------ | --------------------------------------------------------------------------------------------------- |
+| `/`                                 | GET    | None   | Embedded management WebUI when built with `-tags webui`; plain-text 404 in core-only builds         |
+| `/health`                           | GET    | None   | Liveness probe; returns `{"status":"ok"}`                                                           |
+| `/metrics`                          | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                                        |
+| `/api/v1/stats`                     | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters (live in-memory totals)                             |
+| `/api/v1/stats/history`             | GET    | Bearer | Aggregated telemetry time series from `data/state.db` (`?range=5m`, `1h`, or `30d`; `window` alias) |
+| `/api/v1/zones`                     | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)                                 |
+| `/api/v1/zones/reload`              | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                                                  |
+| `/api/v1/zones/{zone}/records`      | GET    | Bearer | List all DNS records in the zone (`?view=public` or `internal`, default `public`)                   |
+| `/api/v1/zones/{zone}/records`      | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file                            |
+| `/api/v1/zones/{zone}/records`      | DELETE | Bearer | Remove a matching DNS record (JSON body with `name`, `type`, `value`); persists to the `.zone` file |
+| `/api/v1/zones/{zone}/records/{id}` | DELETE | Bearer | Remove a record by stable `id` from `GET .../records` (`?view=` optional)                           |
 
 Record create/delete payloads use JSON:
 
@@ -667,6 +719,20 @@ Record create/delete payloads use JSON:
 | `ttl`   | No       | TTL in seconds (defaults to `300` on create)                               |
 | `value` | Yes      | RDATA string; see advanced types below                                     |
 | `view`  | No       | `public` (default) or `internal` for split-DNS view selection              |
+
+`GET /api/v1/zones/{zone}/records` returns:
+
+```json
+{
+  "zone": "arx.local.",
+  "view": "public",
+  "records": [
+    {"id": "a1b2c3d4e5f67890", "name": "router", "type": "A", "ttl": 300, "value": "10.10.0.1"}
+  ]
+}
+```
+
+Each `id` is a stable SHA-256 digest (first 16 hex chars) of `name`, `type`, and `value`. Use it with `DELETE /api/v1/zones/{zone}/records/{id}`.
 
 Advanced record `value` formats:
 
@@ -694,7 +760,9 @@ Every `POST` and `DELETE` request emits an immutable structured audit log via `s
 ```bash
 curl -s http://127.0.0.1:8080/health
 curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/stats
+curl -s -H 'Authorization: Bearer dev-token-change-me' 'http://127.0.0.1:8080/api/v1/stats/history?range=5m'
 curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones
+curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones/arx.local/records
 curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones/reload
 curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
   -d '{"name":"test","type":"A","ttl":3600,"value":"10.0.0.5"}' \
@@ -705,6 +773,8 @@ curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type:
 curl -s -X DELETE -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
   -d '{"name":"test","type":"A","value":"10.0.0.5"}' \
   http://127.0.0.1:8080/api/v1/zones/arx.local/records
+curl -s -X DELETE -H 'Authorization: Bearer dev-token-change-me' \
+  http://127.0.0.1:8080/api/v1/zones/arx.local/records/{record_id}
 # With API TLS enabled:
 curl -s -k -H 'Authorization: Bearer dev-token-change-me' https://127.0.0.1:8080/api/v1/zones
 ```
