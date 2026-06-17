@@ -50,7 +50,7 @@ func auditAction(r *http.Request) string {
 	switch {
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/records"):
 		return "create_record"
-	case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/records"):
+	case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/records"):
 		return "delete_record"
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/reload"):
 		return "reload_zones"
