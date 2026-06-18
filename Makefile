@@ -7,7 +7,7 @@ ARX_DNS         := ./cmd/arx-dns
 ARX_TESTER      := ./cmd/arx-tester
 LDFLAGS         := -trimpath -ldflags="-s -w"
 
-GOOS_GOARCH_PAIRS := linux/amd64 linux/arm64 windows/amd64 windows/arm64 darwin/amd64 darwin/arm64
+GOOS_GOARCH_PAIRS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64
 
 UI_SRC := $(shell find ui/src ui/public -type f 2>/dev/null) \
 	ui/index.html ui/vite.config.ts ui/package.json ui/package-lock.json \
