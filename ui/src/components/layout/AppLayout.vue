@@ -12,7 +12,7 @@ const route = useRoute()
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { to: '/zones', label: 'Zones', icon: List, exact: false },
+  { to: '/zones', label: 'Zones & Records', icon: List, exact: false },
   { to: '/blocklists', label: 'Blocklists', icon: ShieldBan, exact: false },
   { to: '/settings', label: 'Settings', icon: Settings, exact: false },
 ]
@@ -27,9 +27,7 @@ function isActive(path: string, exact: boolean): boolean {
 
 <template>
   <div class="flex min-h-screen bg-background">
-    <aside
-      class="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
-    >
+    <aside class="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div class="border-b border-sidebar-border px-5 py-5">
         <p class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           ARX DNS
@@ -40,19 +38,13 @@ function isActive(path: string, exact: boolean): boolean {
       </div>
 
       <nav class="flex flex-1 flex-col gap-1 p-3">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.to"
-          :to="item.to"
-          :class="
-            cn(
-              'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              isActive(item.to, item.exact)
-                ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-                : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
-            )
-          "
-        >
+        <RouterLink v-for="item in navItems" :key="item.to" :to="item.to" :class="cn(
+          'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+          isActive(item.to, item.exact)
+            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+            : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
+        )
+          ">
           <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
           {{ item.label }}
         </RouterLink>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Loader2, Plus, Trash2 } from 'lucide-vue-next'
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-vue-next'
 import {
   ApiError,
   createZone,
@@ -9,9 +9,20 @@ import {
   deleteZoneRecord,
   fetchZoneRecords,
   fetchZones,
+  updateZoneRecord,
   type ZoneInfo,
   type ZoneRecord,
 } from '@/api/client'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -33,6 +44,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'SRV'] as const
+type RecordType = (typeof RECORD_TYPES)[number]
 
 const zones = ref<ZoneInfo[]>([])
 const selectedZone = ref<ZoneInfo | null>(null)
@@ -40,47 +52,73 @@ const records = ref<ZoneRecord[]>([])
 const loadingZones = ref(true)
 const loadingRecords = ref(false)
 const error = ref<string | null>(null)
-const dialogOpen = ref(false)
+const recordDialogOpen = ref(false)
 const addZoneDialogOpen = ref(false)
 const deleteZoneDialogOpen = ref(false)
+const deleteRecordDialogOpen = ref(false)
 const submitting = ref(false)
 const creatingZone = ref(false)
 const deletingZone = ref(false)
 const deletingId = ref<string | null>(null)
 const newZoneName = ref('')
+const editingRecordId = ref<string | null>(null)
+const recordPendingDelete = ref<ZoneRecord | null>(null)
 
 const form = ref({
   name: '',
-  type: 'A' as (typeof RECORD_TYPES)[number],
+  type: 'A' as RecordType,
   value: '',
   ttl: 3600,
+  mxPriority: 10,
+  mxTarget: '',
+  srvPriority: 0,
+  srvWeight: 0,
+  srvPort: 5060,
+  srvTarget: '',
 })
 
 type RecordFormErrors = {
   name?: string
   value?: string
   ttl?: string
+  mxPriority?: string
+  mxTarget?: string
+  srvPriority?: string
+  srvWeight?: string
+  srvPort?: string
+  srvTarget?: string
 }
 
 const recordFormErrors = ref<RecordFormErrors>({})
 
 const selectedOrigin = computed(() => selectedZone.value?.origin ?? '')
+const isEditingRecord = computed(() => editingRecordId.value !== null)
 
 const fqdnPreview = computed(() => {
-  const name = form.value.name
-  const zoneName = selectedZone.value ? formatOrigin(selectedOrigin.value) : ''
+  return recordFqdn(form.value.name)
+})
 
-  if (!name.trim()) {
-    return 'Enter @ for root'
+const showSimpleValue = computed(() =>
+  ['A', 'AAAA', 'CNAME', 'TXT'].includes(form.value.type),
+)
+const showMxFields = computed(() => form.value.type === 'MX')
+const showSrvFields = computed(() => form.value.type === 'SRV')
+
+function recordFqdn(name: string): string {
+  const zoneName = selectedZone.value ? formatOrigin(selectedOrigin.value) : ''
+  const trimmed = name.trim()
+
+  if (!trimmed) {
+    return ''
   }
   if (!zoneName) {
     return '—'
   }
-  if (name.trim() === '@') {
+  if (trimmed === '@') {
     return zoneName
   }
-  return `${name.trim()}.${zoneName}`
-})
+  return `${trimmed}.${zoneName}`
+}
 
 function clearRecordFieldError(field: keyof RecordFormErrors): void {
   if (!recordFormErrors.value[field]) {
@@ -91,10 +129,57 @@ function clearRecordFieldError(field: keyof RecordFormErrors): void {
   recordFormErrors.value = next
 }
 
+function buildRecordValue(): string {
+  if (form.value.type === 'MX') {
+    return `${form.value.mxPriority} ${form.value.mxTarget.trim()}`
+  }
+  if (form.value.type === 'SRV') {
+    return `${form.value.srvPriority} ${form.value.srvWeight} ${form.value.srvPort} ${form.value.srvTarget.trim()}`
+  }
+  return form.value.value.trim()
+}
+
+function populateFormFromRecord(record: ZoneRecord): void {
+  form.value.name = record.name
+  form.value.type = record.type as RecordType
+  form.value.ttl = record.ttl
+
+  if (record.type === 'MX') {
+    const parts = record.value.trim().split(/\s+/)
+    form.value.mxPriority = Number(parts[0]) || 10
+    form.value.mxTarget = parts.slice(1).join(' ')
+    form.value.value = ''
+    form.value.srvPriority = 0
+    form.value.srvWeight = 0
+    form.value.srvPort = 5060
+    form.value.srvTarget = ''
+    return
+  }
+
+  if (record.type === 'SRV') {
+    const parts = record.value.trim().split(/\s+/)
+    form.value.srvPriority = Number(parts[0]) || 0
+    form.value.srvWeight = Number(parts[1]) || 0
+    form.value.srvPort = Number(parts[2]) || 0
+    form.value.srvTarget = parts.slice(3).join(' ')
+    form.value.value = ''
+    form.value.mxPriority = 10
+    form.value.mxTarget = ''
+    return
+  }
+
+  form.value.value = record.value
+  form.value.mxPriority = 10
+  form.value.mxTarget = ''
+  form.value.srvPriority = 0
+  form.value.srvWeight = 0
+  form.value.srvPort = 5060
+  form.value.srvTarget = ''
+}
+
 function validateRecordForm(): boolean {
   const errors: RecordFormErrors = {}
   const name = form.value.name.trim()
-  const value = form.value.value.trim()
 
   if (!name) {
     errors.name = 'Name is required. Use @ for the zone apex.'
@@ -121,7 +206,27 @@ function validateRecordForm(): boolean {
     }
   }
 
-  if (!value) {
+  if (form.value.type === 'MX') {
+    if (!Number.isFinite(form.value.mxPriority) || form.value.mxPriority < 0) {
+      errors.mxPriority = 'Priority must be 0 or greater.'
+    }
+    if (!form.value.mxTarget.trim()) {
+      errors.mxTarget = 'Mail server target is required.'
+    }
+  } else if (form.value.type === 'SRV') {
+    if (!Number.isFinite(form.value.srvPriority) || form.value.srvPriority < 0) {
+      errors.srvPriority = 'Priority must be 0 or greater.'
+    }
+    if (!Number.isFinite(form.value.srvWeight) || form.value.srvWeight < 0) {
+      errors.srvWeight = 'Weight must be 0 or greater.'
+    }
+    if (!Number.isFinite(form.value.srvPort) || form.value.srvPort < 1 || form.value.srvPort > 65535) {
+      errors.srvPort = 'Port must be between 1 and 65535.'
+    }
+    if (!form.value.srvTarget.trim()) {
+      errors.srvTarget = 'Target is required.'
+    }
+  } else if (!form.value.value.trim()) {
     errors.value = 'Value is required.'
   }
 
@@ -199,13 +304,27 @@ function resetForm(): void {
     type: 'A',
     value: '',
     ttl: 3600,
+    mxPriority: 10,
+    mxTarget: '',
+    srvPriority: 0,
+    srvWeight: 0,
+    srvPort: 5060,
+    srvTarget: '',
   }
   recordFormErrors.value = {}
+  editingRecordId.value = null
 }
 
 function openAddDialog(): void {
   resetForm()
-  dialogOpen.value = true
+  recordDialogOpen.value = true
+}
+
+function openEditDialog(record: ZoneRecord): void {
+  resetForm()
+  editingRecordId.value = record.id
+  populateFormFromRecord(record)
+  recordDialogOpen.value = true
 }
 
 function openAddZoneDialog(): void {
@@ -215,6 +334,11 @@ function openAddZoneDialog(): void {
 
 function openDeleteZoneDialog(): void {
   deleteZoneDialogOpen.value = true
+}
+
+function openDeleteRecordDialog(record: ZoneRecord): void {
+  recordPendingDelete.value = record
+  deleteRecordDialogOpen.value = true
 }
 
 async function submitZone(): Promise<void> {
@@ -278,29 +402,45 @@ async function submitRecord(): Promise<void> {
 
   submitting.value = true
   error.value = null
+  const payload = {
+    name: form.value.name.trim(),
+    type: form.value.type,
+    value: buildRecordValue(),
+    ttl: form.value.ttl,
+    view: selectedZone.value.view,
+  }
+
   try {
-    await createZoneRecord(selectedZone.value.origin, {
-      name: form.value.name.trim(),
-      type: form.value.type,
-      value: form.value.value.trim(),
-      ttl: form.value.ttl,
-      view: selectedZone.value.view,
-    })
-    dialogOpen.value = false
+    if (isEditingRecord.value && editingRecordId.value) {
+      await updateZoneRecord(
+        selectedZone.value.origin,
+        editingRecordId.value,
+        payload,
+      )
+    } else {
+      await createZoneRecord(selectedZone.value.origin, payload)
+    }
+    recordDialogOpen.value = false
     resetForm()
     await Promise.all([loadZones(), loadRecords()])
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to create record'
+    error.value =
+      err instanceof ApiError
+        ? err.message
+        : isEditingRecord.value
+          ? 'Failed to update record'
+          : 'Failed to create record'
   } finally {
     submitting.value = false
   }
 }
 
-async function removeRecord(record: ZoneRecord): Promise<void> {
-  if (!selectedZone.value) {
+async function confirmDeleteRecord(): Promise<void> {
+  if (!selectedZone.value || !recordPendingDelete.value) {
     return
   }
 
+  const record = recordPendingDelete.value
   deletingId.value = record.id
   error.value = null
   try {
@@ -309,6 +449,8 @@ async function removeRecord(record: ZoneRecord): Promise<void> {
       record.id,
       selectedZone.value.view,
     )
+    deleteRecordDialogOpen.value = false
+    recordPendingDelete.value = null
     await Promise.all([loadZones(), loadRecords()])
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : 'Failed to delete record'
@@ -336,6 +478,36 @@ watch(
   () => clearRecordFieldError('ttl'),
 )
 
+watch(
+  () => form.value.mxPriority,
+  () => clearRecordFieldError('mxPriority'),
+)
+
+watch(
+  () => form.value.mxTarget,
+  () => clearRecordFieldError('mxTarget'),
+)
+
+watch(
+  () => form.value.srvPriority,
+  () => clearRecordFieldError('srvPriority'),
+)
+
+watch(
+  () => form.value.srvWeight,
+  () => clearRecordFieldError('srvWeight'),
+)
+
+watch(
+  () => form.value.srvPort,
+  () => clearRecordFieldError('srvPort'),
+)
+
+watch(
+  () => form.value.srvTarget,
+  () => clearRecordFieldError('srvTarget'),
+)
+
 onMounted(async () => {
   await loadZones()
   await loadRecords()
@@ -346,7 +518,7 @@ onMounted(async () => {
   <div class="space-y-6">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 class="font-heading text-2xl font-semibold tracking-tight">Zones</h1>
+        <h1 class="font-heading text-2xl font-semibold tracking-tight">Zones & Records</h1>
         <p class="text-sm text-muted-foreground">
           Manage authoritative DNS zones and records.
         </p>
@@ -486,26 +658,41 @@ onMounted(async () => {
                   :key="record.id"
                   class="border-b border-border/70 last:border-0"
                 >
-                  <td class="px-3 py-2 font-mono text-xs">{{ record.name }}</td>
+                  <td class="px-3 py-2 font-mono text-xs">
+                    {{ record.name }}
+                    <span class="text-muted-foreground">
+                      ({{ recordFqdn(record.name) }})
+                    </span>
+                  </td>
                   <td class="px-3 py-2">{{ record.type }}</td>
                   <td class="px-3 py-2">{{ record.ttl }}</td>
                   <td class="max-w-md truncate px-3 py-2 font-mono text-xs" :title="record.value">
                     {{ record.value }}
                   </td>
                   <td class="px-3 py-2 text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      :disabled="deletingId === record.id"
-                      :aria-label="`Delete ${record.name} ${record.type}`"
-                      @click="removeRecord(record)"
-                    >
-                      <Loader2
-                        v-if="deletingId === record.id"
-                        class="size-4 animate-spin"
-                      />
-                      <Trash2 v-else class="size-4 text-destructive" />
-                    </Button>
+                    <div class="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        :aria-label="`Edit ${record.name} ${record.type}`"
+                        @click="openEditDialog(record)"
+                      >
+                        <Pencil class="size-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        :disabled="deletingId === record.id"
+                        :aria-label="`Delete ${record.name} ${record.type}`"
+                        @click="openDeleteRecordDialog(record)"
+                      >
+                        <Loader2
+                          v-if="deletingId === record.id"
+                          class="size-4 animate-spin"
+                        />
+                        <Trash2 v-else class="size-4 text-destructive" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -553,14 +740,15 @@ onMounted(async () => {
       </DialogContent>
     </Dialog>
 
-    <Dialog v-model:open="deleteZoneDialogOpen">
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Delete Zone</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete this entire zone? This cannot be undone.
-          </DialogDescription>
-        </DialogHeader>
+    <AlertDialog v-model:open="deleteZoneDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete Zone</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently delete the entire zone and all of its records from disk.
+            This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
 
         <p v-if="selectedZone" class="text-sm">
           Zone:
@@ -568,33 +756,61 @@ onMounted(async () => {
           ({{ selectedZone.view }} view)
         </p>
 
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="deletingZone">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             :disabled="deletingZone"
-            @click="deleteZoneDialogOpen = false"
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            :disabled="deletingZone"
-            @click="confirmDeleteZone"
+            @click.prevent="confirmDeleteZone"
           >
             <Loader2 v-if="deletingZone" class="size-4 animate-spin" />
             Delete Zone
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
 
-    <Dialog v-model:open="dialogOpen">
+    <AlertDialog v-model:open="deleteRecordDialogOpen">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete Record</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently remove the record from the zone file.
+            This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <p v-if="recordPendingDelete" class="text-sm font-mono">
+          {{ recordPendingDelete.name }}
+          <span class="text-muted-foreground">
+            ({{ recordFqdn(recordPendingDelete.name) }})
+          </span>
+          {{ recordPendingDelete.type }}
+          {{ recordPendingDelete.value }}
+        </p>
+
+        <AlertDialogFooter>
+          <AlertDialogCancel :disabled="deletingId !== null">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            :disabled="deletingId !== null"
+            @click.prevent="confirmDeleteRecord"
+          >
+            <Loader2 v-if="deletingId !== null" class="size-4 animate-spin" />
+            Delete Record
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <Dialog v-model:open="recordDialogOpen">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add DNS Record</DialogTitle>
+          <DialogTitle>
+            {{ isEditingRecord ? 'Edit DNS Record' : 'Add DNS Record' }}
+          </DialogTitle>
           <DialogDescription>
-            Create a new record in
+            {{ isEditingRecord ? 'Update' : 'Create' }} a record in
             <span class="font-medium text-foreground">
               {{ selectedZone ? formatOrigin(selectedOrigin) : 'zone' }}
             </span>.
@@ -617,7 +833,7 @@ onMounted(async () => {
               class="text-xs text-muted-foreground"
               :class="recordFormErrors.name && 'sr-only'"
             >
-              Resolves to: {{ fqdnPreview }}
+              Resolves to: {{ fqdnPreview || 'Enter @ for root' }}
             </p>
             <p
               v-if="recordFormErrors.name"
@@ -641,12 +857,18 @@ onMounted(async () => {
             </select>
           </div>
 
-          <div class="space-y-2">
+          <div v-if="showSimpleValue" class="space-y-2">
             <Label for="record-value">Value</Label>
             <Input
               id="record-value"
               v-model="form.value"
-              placeholder="IP address or target hostname"
+              :placeholder="
+                form.type === 'TXT'
+                  ? 'Text value or quoted string'
+                  : form.type === 'A' || form.type === 'AAAA'
+                    ? 'IP address'
+                    : 'Target hostname'
+              "
               :class="recordFormErrors.value && 'border-destructive focus-visible:ring-destructive'"
               :aria-invalid="recordFormErrors.value ? true : undefined"
               :aria-describedby="recordFormErrors.value ? 'record-value-error' : undefined"
@@ -659,6 +881,109 @@ onMounted(async () => {
               {{ recordFormErrors.value }}
             </p>
           </div>
+
+          <template v-if="showMxFields">
+            <div class="space-y-2">
+              <Label for="record-mx-priority">Priority</Label>
+              <Input
+                id="record-mx-priority"
+                v-model.number="form.mxPriority"
+                type="number"
+                min="0"
+                :class="recordFormErrors.mxPriority && 'border-destructive focus-visible:ring-destructive'"
+              />
+              <p
+                v-if="recordFormErrors.mxPriority"
+                class="text-xs text-destructive"
+              >
+                {{ recordFormErrors.mxPriority }}
+              </p>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-mx-target">Mail Server Target</Label>
+              <Input
+                id="record-mx-target"
+                v-model="form.mxTarget"
+                placeholder="mail.example.com"
+                :class="recordFormErrors.mxTarget && 'border-destructive focus-visible:ring-destructive'"
+              />
+              <p
+                v-if="recordFormErrors.mxTarget"
+                class="text-xs text-destructive"
+              >
+                {{ recordFormErrors.mxTarget }}
+              </p>
+            </div>
+          </template>
+
+          <template v-if="showSrvFields">
+            <div class="grid gap-4 sm:grid-cols-3">
+              <div class="space-y-2">
+                <Label for="record-srv-priority">Priority</Label>
+                <Input
+                  id="record-srv-priority"
+                  v-model.number="form.srvPriority"
+                  type="number"
+                  min="0"
+                  :class="recordFormErrors.srvPriority && 'border-destructive focus-visible:ring-destructive'"
+                />
+                <p
+                  v-if="recordFormErrors.srvPriority"
+                  class="text-xs text-destructive"
+                >
+                  {{ recordFormErrors.srvPriority }}
+                </p>
+              </div>
+              <div class="space-y-2">
+                <Label for="record-srv-weight">Weight</Label>
+                <Input
+                  id="record-srv-weight"
+                  v-model.number="form.srvWeight"
+                  type="number"
+                  min="0"
+                  :class="recordFormErrors.srvWeight && 'border-destructive focus-visible:ring-destructive'"
+                />
+                <p
+                  v-if="recordFormErrors.srvWeight"
+                  class="text-xs text-destructive"
+                >
+                  {{ recordFormErrors.srvWeight }}
+                </p>
+              </div>
+              <div class="space-y-2">
+                <Label for="record-srv-port">Port</Label>
+                <Input
+                  id="record-srv-port"
+                  v-model.number="form.srvPort"
+                  type="number"
+                  min="1"
+                  max="65535"
+                  :class="recordFormErrors.srvPort && 'border-destructive focus-visible:ring-destructive'"
+                />
+                <p
+                  v-if="recordFormErrors.srvPort"
+                  class="text-xs text-destructive"
+                >
+                  {{ recordFormErrors.srvPort }}
+                </p>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-srv-target">Target</Label>
+              <Input
+                id="record-srv-target"
+                v-model="form.srvTarget"
+                placeholder="sip.example.com"
+                :class="recordFormErrors.srvTarget && 'border-destructive focus-visible:ring-destructive'"
+              />
+              <p
+                v-if="recordFormErrors.srvTarget"
+                class="text-xs text-destructive"
+              >
+                {{ recordFormErrors.srvTarget }}
+              </p>
+            </div>
+          </template>
 
           <div class="space-y-2">
             <Label for="record-ttl">TTL</Label>
@@ -684,13 +1009,13 @@ onMounted(async () => {
               type="button"
               variant="outline"
               :disabled="submitting"
-              @click="dialogOpen = false"
+              @click="recordDialogOpen = false"
             >
               Cancel
             </Button>
             <Button type="submit" :disabled="submitting">
               <Loader2 v-if="submitting" class="size-4 animate-spin" />
-              Add Record
+              {{ isEditingRecord ? 'Save Changes' : 'Add Record' }}
             </Button>
           </DialogFooter>
         </form>

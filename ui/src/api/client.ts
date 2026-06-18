@@ -166,6 +166,17 @@ export function createZoneRecord(
   })
 }
 
+export function updateZoneRecord(
+  origin: string,
+  recordId: string,
+  payload: CreateRecordPayload,
+): Promise<{ status: string; message: string }> {
+  return apiRequest(
+    `/api/v1/zones/${zonePath(origin)}/records/${encodeURIComponent(recordId)}`,
+    { method: 'PUT', body: payload },
+  )
+}
+
 export function deleteZoneRecord(
   origin: string,
   recordId: string,
