@@ -94,7 +94,7 @@ export interface ZoneRecord {
   id: string
   name: string
   type: string
-  ttl: number
+  ttl: string
   value: string
 }
 
@@ -111,7 +111,7 @@ export interface ZoneRecordsResponse {
 export interface CreateRecordPayload {
   name: string
   type: string
-  ttl?: number
+  ttl?: string | number
   value: string
   view?: 'public' | 'internal'
 }
