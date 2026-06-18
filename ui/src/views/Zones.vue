@@ -41,31 +41,44 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import {
+  CAA_TAGS,
+  CERT_TYPES,
+  DANE_MATCHING_TYPES,
+  DANE_SELECTORS,
+  DANE_USAGES,
+  DNSKEY_FLAGS,
+  DNSKEY_PROTOCOLS,
+  DNSSEC_ALGORITHMS,
+  DS_DIGEST_TYPES,
+  LOC_HEMISPHERES,
+  RECORD_TYPES,
+  SSHFP_ALGORITHMS,
+  SSHFP_TYPES,
+  buildRecordValue,
+  contentPlaceholder,
+  createDefaultFormState,
+  isDaneType,
+  isMultilineContentType,
+  isSimpleContentType,
+  populateFormFromRecord,
+  stripTrailingDot,
+  type RecordFormErrors,
+  type RecordFormState,
+  type RecordType,
+  validateRecordForm,
+} from '@/utils/dnsFormatting'
 
-const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'TXT', 'MX', 'SRV'] as const
-type RecordType = (typeof RECORD_TYPES)[number] | 'SOA'
 type ZoneView = 'public' | 'internal'
-
-const BIND_TTL_UNITS = 'wdhms'
-
-function isValidBindTTL(raw: string): boolean {
-  const value = raw.trim()
-  if (!value) {
-    return false
-  }
-  if (/^\d+$/.test(value)) {
-    return Number(value) >= 1
-  }
-  if (!/^\d+[wdhms](\d+[wdhms])*$/.test(value)) {
-    return false
-  }
-  return [...value].some((ch) => BIND_TTL_UNITS.includes(ch))
-}
-
-function stripTrailingDot(host: string): string {
-  return host.replace(/\.$/, '')
-}
 
 const zones = ref<ZoneInfo[]>([])
 const selectedZone = ref<ZoneInfo | null>(null)
@@ -86,60 +99,14 @@ const newZoneView = ref<ZoneView>('public')
 const editingRecordId = ref<string | null>(null)
 const recordPendingDelete = ref<ZoneRecord | null>(null)
 
-const form = ref({
-  name: '',
-  type: 'A' as RecordType,
-  value: '',
-  ttl: '3600',
-  mxPriority: 10,
-  mxTarget: '',
-  srvPriority: 0,
-  srvWeight: 0,
-  srvPort: 5060,
-  srvTarget: '',
-  soaPrimaryNS: '',
-  soaAdminEmail: '',
-  soaSerial: 0,
-  soaRefresh: '3600',
-  soaRetry: '600',
-  soaExpire: '86400',
-  soaMinimumTTL: '300',
-})
-
-type RecordFormErrors = {
-  name?: string
-  value?: string
-  ttl?: string
-  mxPriority?: string
-  mxTarget?: string
-  srvPriority?: string
-  srvWeight?: string
-  srvPort?: string
-  srvTarget?: string
-  soaPrimaryNS?: string
-  soaAdminEmail?: string
-  soaRefresh?: string
-  soaRetry?: string
-  soaExpire?: string
-  soaMinimumTTL?: string
-}
-
+const form = ref<RecordFormState>(createDefaultFormState())
 const recordFormErrors = ref<RecordFormErrors>({})
 
 const selectedOrigin = computed(() => selectedZone.value?.origin ?? '')
 const isEditingRecord = computed(() => editingRecordId.value !== null)
-
-const fqdnPreview = computed(() => {
-  return recordFqdn(form.value.name)
-})
-
-const showSimpleValue = computed(() =>
-  ['A', 'AAAA', 'CNAME', 'TXT'].includes(form.value.type),
-)
-const showMxFields = computed(() => form.value.type === 'MX')
-const showSrvFields = computed(() => form.value.type === 'SRV')
-const showSoaFields = computed(() => form.value.type === 'SOA')
 const isSoaRecord = computed(() => form.value.type === 'SOA')
+
+const fqdnPreview = computed(() => recordFqdn(form.value.name))
 
 function recordFqdn(name: string): string {
   const zoneName = selectedZone.value ? formatOrigin(selectedOrigin.value) : ''
@@ -166,183 +133,36 @@ function clearRecordFieldError(field: keyof RecordFormErrors): void {
   recordFormErrors.value = next
 }
 
-function buildRecordValue(): string {
-  if (form.value.type === 'MX') {
-    return `${form.value.mxPriority} ${form.value.mxTarget.trim()}`
-  }
-  if (form.value.type === 'SRV') {
-    return `${form.value.srvPriority} ${form.value.srvWeight} ${form.value.srvPort} ${form.value.srvTarget.trim()}`
-  }
-  if (form.value.type === 'SOA') {
-    return [
-      form.value.soaPrimaryNS.trim(),
-      form.value.soaAdminEmail.trim(),
-      form.value.soaSerial,
-      form.value.soaRefresh.trim(),
-      form.value.soaRetry.trim(),
-      form.value.soaExpire.trim(),
-      form.value.soaMinimumTTL.trim(),
-    ].join(' ')
-  }
-  return form.value.value.trim()
+function setSelectNumber(
+  field: keyof Pick<
+    RecordFormState,
+    | 'dsAlgorithm'
+    | 'dsDigestType'
+    | 'sshfpAlgorithm'
+    | 'sshfpType'
+    | 'daneUsage'
+    | 'daneSelector'
+    | 'daneMatchingType'
+    | 'dnskeyFlags'
+    | 'dnskeyProtocol'
+    | 'dnskeyAlgorithm'
+    | 'certType'
+    | 'certAlgorithm'
+  >,
+  value: string,
+): void {
+  form.value[field] = Number(value) as never
 }
 
-function resetSoaFields(): void {
-  form.value.soaPrimaryNS = ''
-  form.value.soaAdminEmail = ''
-  form.value.soaSerial = 0
-  form.value.soaRefresh = '3600'
-  form.value.soaRetry = '600'
-  form.value.soaExpire = '86400'
-  form.value.soaMinimumTTL = '300'
-}
-
-function populateSoaFromRecord(record: ZoneRecord): void {
-  const parts = record.value.trim().split(/\s+/)
-  form.value.soaPrimaryNS = stripTrailingDot(parts[0] ?? '')
-  form.value.soaAdminEmail = stripTrailingDot(parts[1] ?? '')
-  form.value.soaSerial = Number(parts[2]) || 0
-  form.value.soaRefresh = parts[3] ?? '3600'
-  form.value.soaRetry = parts[4] ?? '600'
-  form.value.soaExpire = parts[5] ?? '86400'
-  form.value.soaMinimumTTL = parts[6] ?? '300'
-  form.value.value = ''
-}
-
-function populateFormFromRecord(record: ZoneRecord): void {
-  form.value.name = record.name
-  form.value.type = record.type as RecordType
-  form.value.ttl = record.ttl
-
-  if (record.type === 'SOA') {
-    populateSoaFromRecord(record)
-    form.value.mxPriority = 10
-    form.value.mxTarget = ''
-    form.value.srvPriority = 0
-    form.value.srvWeight = 0
-    form.value.srvPort = 5060
-    form.value.srvTarget = ''
-    return
-  }
-
-  if (record.type === 'MX') {
-    const parts = record.value.trim().split(/\s+/)
-    form.value.mxPriority = Number(parts[0]) || 10
-    form.value.mxTarget = parts.slice(1).join(' ')
-    form.value.value = ''
-    form.value.srvPriority = 0
-    form.value.srvWeight = 0
-    form.value.srvPort = 5060
-    form.value.srvTarget = ''
-    resetSoaFields()
-    return
-  }
-
-  if (record.type === 'SRV') {
-    const parts = record.value.trim().split(/\s+/)
-    form.value.srvPriority = Number(parts[0]) || 0
-    form.value.srvWeight = Number(parts[1]) || 0
-    form.value.srvPort = Number(parts[2]) || 0
-    form.value.srvTarget = parts.slice(3).join(' ')
-    form.value.value = ''
-    form.value.mxPriority = 10
-    form.value.mxTarget = ''
-    resetSoaFields()
-    return
-  }
-
-  form.value.value = record.value
-  form.value.mxPriority = 10
-  form.value.mxTarget = ''
-  form.value.srvPriority = 0
-  form.value.srvWeight = 0
-  form.value.srvPort = 5060
-  form.value.srvTarget = ''
-  resetSoaFields()
-}
-
-function validateRecordForm(): boolean {
-  const errors: RecordFormErrors = {}
-  const name = form.value.name.trim()
-
-  if (!name) {
-    errors.name = 'Name is required. Use @ for the zone apex.'
-  } else if (name !== '@') {
-    if (name.includes('..')) {
-      errors.name = 'Name cannot contain consecutive dots.'
-    } else if (!/^[a-zA-Z0-9_*.-]+$/.test(name)) {
-      errors.name = 'Name contains invalid characters.'
-    } else {
-      for (const label of name.split('.')) {
-        if (!label) {
-          errors.name = 'Name cannot contain empty labels.'
-          break
-        }
-        if (label.length > 63) {
-          errors.name = 'Each label must be 63 characters or fewer.'
-          break
-        }
-        if (label.startsWith('-') || label.endsWith('-')) {
-          errors.name = 'Labels cannot start or end with a hyphen.'
-          break
-        }
-      }
-    }
-  }
-
-  if (form.value.type === 'MX') {
-    if (!Number.isFinite(form.value.mxPriority) || form.value.mxPriority < 0) {
-      errors.mxPriority = 'Priority must be 0 or greater.'
-    }
-    if (!form.value.mxTarget.trim()) {
-      errors.mxTarget = 'Mail server target is required.'
-    }
-  } else if (form.value.type === 'SRV') {
-    if (!Number.isFinite(form.value.srvPriority) || form.value.srvPriority < 0) {
-      errors.srvPriority = 'Priority must be 0 or greater.'
-    }
-    if (!Number.isFinite(form.value.srvWeight) || form.value.srvWeight < 0) {
-      errors.srvWeight = 'Weight must be 0 or greater.'
-    }
-    if (!Number.isFinite(form.value.srvPort) || form.value.srvPort < 1 || form.value.srvPort > 65535) {
-      errors.srvPort = 'Port must be between 1 and 65535.'
-    }
-    if (!form.value.srvTarget.trim()) {
-      errors.srvTarget = 'Target is required.'
-    }
-  } else if (form.value.type === 'SOA') {
-    if (!form.value.soaPrimaryNS.trim()) {
-      errors.soaPrimaryNS = 'Primary nameserver is required.'
-    }
-    if (!form.value.soaAdminEmail.trim()) {
-      errors.soaAdminEmail = 'Admin email is required.'
-    }
-    if (!isValidBindTTL(form.value.soaRefresh)) {
-      errors.soaRefresh = 'Enter a valid TTL (e.g. 3600, 1h).'
-    }
-    if (!isValidBindTTL(form.value.soaRetry)) {
-      errors.soaRetry = 'Enter a valid TTL (e.g. 600, 10m).'
-    }
-    if (!isValidBindTTL(form.value.soaExpire)) {
-      errors.soaExpire = 'Enter a valid TTL (e.g. 86400, 1d).'
-    }
-    if (!isValidBindTTL(form.value.soaMinimumTTL)) {
-      errors.soaMinimumTTL = 'Enter a valid TTL (e.g. 300, 5m).'
-    }
-  } else if (!form.value.value.trim()) {
-    errors.value = 'Value is required.'
-  }
-
-  if (!isValidBindTTL(form.value.ttl)) {
-    errors.ttl = 'Enter a valid TTL (e.g. 3600, 5m, 1h, 1d).'
-  }
-
-  recordFormErrors.value = errors
-  return Object.keys(errors).length === 0
+function setSelectString(
+  field: keyof Pick<RecordFormState, 'caaTag' | 'locLatHem' | 'locLonHem'>,
+  value: string,
+): void {
+  form.value[field] = value as never
 }
 
 function formatOrigin(origin: string): string {
-  return origin.replace(/\.$/, '')
+  return stripTrailingDot(origin)
 }
 
 function zoneKey(zone: ZoneInfo): string {
@@ -402,25 +222,7 @@ function selectZone(zone: ZoneInfo): void {
 }
 
 function resetForm(): void {
-  form.value = {
-    name: '',
-    type: 'A',
-    value: '',
-    ttl: '3600',
-    mxPriority: 10,
-    mxTarget: '',
-    srvPriority: 0,
-    srvWeight: 0,
-    srvPort: 5060,
-    srvTarget: '',
-    soaPrimaryNS: '',
-    soaAdminEmail: '',
-    soaSerial: 0,
-    soaRefresh: '3600',
-    soaRetry: '600',
-    soaExpire: '86400',
-    soaMinimumTTL: '300',
-  }
+  form.value = createDefaultFormState()
   recordFormErrors.value = {}
   editingRecordId.value = null
 }
@@ -433,7 +235,7 @@ function openAddDialog(): void {
 function openEditDialog(record: ZoneRecord): void {
   resetForm()
   editingRecordId.value = record.id
-  populateFormFromRecord(record)
+  populateFormFromRecord(form.value, record)
   recordDialogOpen.value = true
 }
 
@@ -507,7 +309,9 @@ async function submitRecord(): Promise<void> {
     return
   }
 
-  if (!validateRecordForm()) {
+  const errors = validateRecordForm(form.value)
+  recordFormErrors.value = errors
+  if (Object.keys(errors).length > 0) {
     return
   }
 
@@ -516,7 +320,7 @@ async function submitRecord(): Promise<void> {
   const payload = {
     name: form.value.name.trim(),
     type: form.value.type,
-    value: buildRecordValue(),
+    value: buildRecordValue(form.value),
     ttl: form.value.ttl.trim(),
     view: selectedZone.value.view,
   }
@@ -570,6 +374,11 @@ async function confirmDeleteRecord(): Promise<void> {
   }
 }
 
+function onRecordTypeChange(value: string): void {
+  form.value.type = value as RecordType
+  recordFormErrors.value = {}
+}
+
 watch(selectedZone, () => {
   void loadRecords()
 })
@@ -580,73 +389,8 @@ watch(
 )
 
 watch(
-  () => form.value.value,
-  () => clearRecordFieldError('value'),
-)
-
-watch(
   () => form.value.ttl,
   () => clearRecordFieldError('ttl'),
-)
-
-watch(
-  () => form.value.mxPriority,
-  () => clearRecordFieldError('mxPriority'),
-)
-
-watch(
-  () => form.value.mxTarget,
-  () => clearRecordFieldError('mxTarget'),
-)
-
-watch(
-  () => form.value.srvPriority,
-  () => clearRecordFieldError('srvPriority'),
-)
-
-watch(
-  () => form.value.srvWeight,
-  () => clearRecordFieldError('srvWeight'),
-)
-
-watch(
-  () => form.value.srvPort,
-  () => clearRecordFieldError('srvPort'),
-)
-
-watch(
-  () => form.value.srvTarget,
-  () => clearRecordFieldError('srvTarget'),
-)
-
-watch(
-  () => form.value.soaPrimaryNS,
-  () => clearRecordFieldError('soaPrimaryNS'),
-)
-
-watch(
-  () => form.value.soaAdminEmail,
-  () => clearRecordFieldError('soaAdminEmail'),
-)
-
-watch(
-  () => form.value.soaRefresh,
-  () => clearRecordFieldError('soaRefresh'),
-)
-
-watch(
-  () => form.value.soaRetry,
-  () => clearRecordFieldError('soaRetry'),
-)
-
-watch(
-  () => form.value.soaExpire,
-  () => clearRecordFieldError('soaExpire'),
-)
-
-watch(
-  () => form.value.soaMinimumTTL,
-  () => clearRecordFieldError('soaMinimumTTL'),
 )
 
 onMounted(async () => {
@@ -707,8 +451,7 @@ onMounted(async () => {
               <button type="button" :class="cn(
                 'flex w-full flex-col items-start gap-1 px-4 py-3 text-left text-sm transition-colors hover:bg-accent',
                 isSelected(zone) && 'bg-accent text-accent-foreground',
-              )
-                " @click="selectZone(zone)">
+              )" @click="selectZone(zone)">
                 <span class="font-medium">{{ formatOrigin(zone.origin) }}</span>
                 <span class="inline-flex items-center gap-2 text-xs text-muted-foreground">
                   <span :class="cn(
@@ -716,8 +459,7 @@ onMounted(async () => {
                     zone.view === 'internal'
                       ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
                       : 'bg-sky-500/10 text-sky-700 dark:text-sky-400',
-                  )
-                    ">
+                  )">
                     {{ zone.view }}
                   </span>
                   <span>{{ zone.records }} records</span>
@@ -902,7 +644,7 @@ onMounted(async () => {
     </AlertDialog>
 
     <Dialog v-model:open="recordDialogOpen">
-      <DialogContent>
+      <DialogContent class="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {{ isEditingRecord ? 'Edit DNS Record' : 'Add DNS Record' }}
@@ -932,32 +674,37 @@ onMounted(async () => {
           </div>
 
           <div class="space-y-2">
-            <Label for="record-type">Type</Label>
-            <select id="record-type" v-model="form.type" :disabled="isSoaRecord"
-              class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60">
-              <option v-if="isSoaRecord" value="SOA">SOA</option>
-              <option v-for="recordType in RECORD_TYPES" :key="recordType" :value="recordType">
-                {{ recordType }}
-              </option>
-            </select>
+            <Label>Type</Label>
+            <Select :model-value="form.type" :disabled="isSoaRecord" @update:model-value="onRecordTypeChange">
+              <SelectTrigger :class="isSoaRecord && 'opacity-60'">
+                <SelectValue placeholder="Select record type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-if="isSoaRecord" value="SOA">SOA</SelectItem>
+                <SelectItem v-for="recordType in RECORD_TYPES" :key="recordType" :value="recordType">
+                  {{ recordType }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
-          <div v-if="showSimpleValue" class="space-y-2">
-            <Label for="record-value">Value</Label>
-            <Input id="record-value" v-model="form.value" :placeholder="form.type === 'TXT'
-                ? 'Text value or quoted string'
-                : form.type === 'A' || form.type === 'AAAA'
-                  ? 'IP address'
-                  : 'Target hostname'
-              " :class="recordFormErrors.value && 'border-destructive focus-visible:ring-destructive'"
-              :aria-invalid="recordFormErrors.value ? true : undefined"
-              :aria-describedby="recordFormErrors.value ? 'record-value-error' : undefined" />
-            <p v-if="recordFormErrors.value" id="record-value-error" class="text-xs text-destructive">
+          <!-- Simple content types: A, AAAA, CNAME, PTR, NS, OPENPGPKEY, TXT -->
+          <div v-if="isSimpleContentType(form.type)" class="space-y-2">
+            <Label for="record-content">
+              {{ form.type === 'TXT' ? 'Content' : form.type === 'A' || form.type === 'AAAA' ? 'Address' : 'Target' }}
+            </Label>
+            <Textarea v-if="isMultilineContentType(form.type)" id="record-content" v-model="form.content"
+              :placeholder="contentPlaceholder(form.type)"
+              :class="recordFormErrors.value && 'border-destructive focus-visible:ring-destructive'" />
+            <Input v-else id="record-content" v-model="form.content" :placeholder="contentPlaceholder(form.type)"
+              :class="recordFormErrors.value && 'border-destructive focus-visible:ring-destructive'" />
+            <p v-if="recordFormErrors.value" class="text-xs text-destructive">
               {{ recordFormErrors.value }}
             </p>
           </div>
 
-          <template v-if="showMxFields">
+          <!-- MX -->
+          <template v-if="form.type === 'MX'">
             <div class="space-y-2">
               <Label for="record-mx-priority">Priority</Label>
               <Input id="record-mx-priority" v-model.number="form.mxPriority" type="number" min="0"
@@ -976,7 +723,8 @@ onMounted(async () => {
             </div>
           </template>
 
-          <template v-if="showSrvFields">
+          <!-- SRV -->
+          <template v-if="form.type === 'SRV'">
             <div class="grid gap-4 sm:grid-cols-3">
               <div class="space-y-2">
                 <Label for="record-srv-priority">Priority</Label>
@@ -1013,7 +761,463 @@ onMounted(async () => {
             </div>
           </template>
 
-          <template v-if="showSoaFields">
+          <!-- CAA -->
+          <template v-if="form.type === 'CAA'">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label>Tag</Label>
+                <Select :model-value="form.caaTag" @update:model-value="setSelectString('caaTag', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select tag" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in CAA_TAGS" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label for="record-caa-flags">Flags</Label>
+                <Input id="record-caa-flags" v-model.number="form.caaFlags" type="number" min="0" max="255" />
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-caa-value">Value</Label>
+              <Input id="record-caa-value" v-model="form.caaValue" placeholder="letsencrypt.org"
+                :class="recordFormErrors.caaValue && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.caaValue" class="text-xs text-destructive">
+                {{ recordFormErrors.caaValue }}
+              </p>
+            </div>
+          </template>
+
+          <!-- DS -->
+          <template v-if="form.type === 'DS'">
+            <div class="space-y-2">
+              <Label for="record-ds-key-tag">Key Tag</Label>
+              <Input id="record-ds-key-tag" v-model.number="form.dsKeyTag" type="number" min="0" max="65535" />
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label>Algorithm</Label>
+                <Select :model-value="String(form.dsAlgorithm)"
+                  @update:model-value="setSelectNumber('dsAlgorithm', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select algorithm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DNSSEC_ALGORITHMS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label>Digest Type</Label>
+                <Select :model-value="String(form.dsDigestType)"
+                  @update:model-value="setSelectNumber('dsDigestType', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select digest type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DS_DIGEST_TYPES" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-ds-digest">Digest</Label>
+              <Input id="record-ds-digest" v-model="form.dsDigest" placeholder="Hex digest" class="font-mono text-xs"
+                :class="recordFormErrors.dsDigest && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.dsDigest" class="text-xs text-destructive">
+                {{ recordFormErrors.dsDigest }}
+              </p>
+            </div>
+          </template>
+
+          <!-- SSHFP -->
+          <template v-if="form.type === 'SSHFP'">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label>Algorithm</Label>
+                <Select :model-value="String(form.sshfpAlgorithm)"
+                  @update:model-value="setSelectNumber('sshfpAlgorithm', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select algorithm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in SSHFP_ALGORITHMS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label>Type</Label>
+                <Select :model-value="String(form.sshfpType)"
+                  @update:model-value="setSelectNumber('sshfpType', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select fingerprint type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in SSHFP_TYPES" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-sshfp-fingerprint">Fingerprint</Label>
+              <Input id="record-sshfp-fingerprint" v-model="form.sshfpFingerprint" placeholder="Hex fingerprint"
+                class="font-mono text-xs"
+                :class="recordFormErrors.sshfpFingerprint && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.sshfpFingerprint" class="text-xs text-destructive">
+                {{ recordFormErrors.sshfpFingerprint }}
+              </p>
+            </div>
+          </template>
+
+          <!-- TLSA / SMIMEA -->
+          <template v-if="isDaneType(form.type)">
+            <div class="grid gap-4 sm:grid-cols-3">
+              <div class="space-y-2">
+                <Label>Usage</Label>
+                <Select :model-value="String(form.daneUsage)"
+                  @update:model-value="setSelectNumber('daneUsage', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Usage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DANE_USAGES" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label>Selector</Label>
+                <Select :model-value="String(form.daneSelector)"
+                  @update:model-value="setSelectNumber('daneSelector', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selector" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DANE_SELECTORS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label>Matching Type</Label>
+                <Select :model-value="String(form.daneMatchingType)"
+                  @update:model-value="setSelectNumber('daneMatchingType', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Matching type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DANE_MATCHING_TYPES" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-dane-cert">Certificate / Data</Label>
+              <Textarea id="record-dane-cert" v-model="form.daneCertificate"
+                placeholder="Hex certificate association data" class="font-mono text-xs"
+                :class="recordFormErrors.daneCertificate && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.daneCertificate" class="text-xs text-destructive">
+                {{ recordFormErrors.daneCertificate }}
+              </p>
+            </div>
+          </template>
+
+          <!-- DNSKEY -->
+          <template v-if="form.type === 'DNSKEY'">
+            <div class="grid gap-4 sm:grid-cols-3">
+              <div class="space-y-2">
+                <Label>Flags</Label>
+                <Select :model-value="String(form.dnskeyFlags)"
+                  @update:model-value="setSelectNumber('dnskeyFlags', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Flags" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DNSKEY_FLAGS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label>Protocol</Label>
+                <Select :model-value="String(form.dnskeyProtocol)"
+                  @update:model-value="setSelectNumber('dnskeyProtocol', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Protocol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DNSKEY_PROTOCOLS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label>Algorithm</Label>
+                <Select :model-value="String(form.dnskeyAlgorithm)"
+                  @update:model-value="setSelectNumber('dnskeyAlgorithm', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Algorithm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DNSSEC_ALGORITHMS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-dnskey-key">Public Key</Label>
+              <Textarea id="record-dnskey-key" v-model="form.dnskeyPublicKey" placeholder="Base64-encoded public key"
+                class="font-mono text-xs"
+                :class="recordFormErrors.dnskeyPublicKey && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.dnskeyPublicKey" class="text-xs text-destructive">
+                {{ recordFormErrors.dnskeyPublicKey }}
+              </p>
+            </div>
+          </template>
+
+          <!-- HTTPS / SVCB -->
+          <template v-if="form.type === 'HTTPS' || form.type === 'SVCB'">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="record-svc-priority">Priority</Label>
+                <Input id="record-svc-priority" v-model.number="form.svcPriority" type="number" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-svc-target">Target</Label>
+                <Input id="record-svc-target" v-model="form.svcTarget" placeholder=". or hostname"
+                  :class="recordFormErrors.svcTarget && 'border-destructive focus-visible:ring-destructive'" />
+                <p v-if="recordFormErrors.svcTarget" class="text-xs text-destructive">
+                  {{ recordFormErrors.svcTarget }}
+                </p>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-svc-params">Parameters (optional)</Label>
+              <Input id="record-svc-params" v-model="form.svcParams" placeholder="alpn=h2,h3 ipv4hint=192.0.2.1" />
+              <p class="text-xs text-muted-foreground">
+                Space-separated SvcParams (e.g. alpn, port, ipv4hint).
+              </p>
+            </div>
+          </template>
+
+          <!-- CERT -->
+          <template v-if="form.type === 'CERT'">
+            <div class="grid gap-4 sm:grid-cols-3">
+              <div class="space-y-2">
+                <Label>Type</Label>
+                <Select :model-value="String(form.certType)" @update:model-value="setSelectNumber('certType', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Certificate type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in CERT_TYPES" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-2">
+                <Label for="record-cert-key-tag">Key Tag</Label>
+                <Input id="record-cert-key-tag" v-model.number="form.certKeyTag" type="number" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label>Algorithm</Label>
+                <Select :model-value="String(form.certAlgorithm)"
+                  @update:model-value="setSelectNumber('certAlgorithm', $event)">
+                  <SelectTrigger>
+                    <SelectValue placeholder="Algorithm" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in DNSSEC_ALGORITHMS" :key="opt.value" :value="String(opt.value)">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-cert-data">Certificate / Data</Label>
+              <Textarea id="record-cert-data" v-model="form.certData" placeholder="Hex certificate data"
+                class="font-mono text-xs"
+                :class="recordFormErrors.certData && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.certData" class="text-xs text-destructive">
+                {{ recordFormErrors.certData }}
+              </p>
+            </div>
+          </template>
+
+          <!-- NAPTR -->
+          <template v-if="form.type === 'NAPTR'">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="record-naptr-order">Order</Label>
+                <Input id="record-naptr-order" v-model.number="form.naptrOrder" type="number" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-naptr-preference">Preference</Label>
+                <Input id="record-naptr-preference" v-model.number="form.naptrPreference" type="number" min="0" />
+              </div>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="record-naptr-flags">Flags</Label>
+                <Input id="record-naptr-flags" v-model="form.naptrFlags" placeholder="u"
+                  :class="recordFormErrors.naptrFlags && 'border-destructive focus-visible:ring-destructive'" />
+                <p v-if="recordFormErrors.naptrFlags" class="text-xs text-destructive">
+                  {{ recordFormErrors.naptrFlags }}
+                </p>
+              </div>
+              <div class="space-y-2">
+                <Label for="record-naptr-service">Service</Label>
+                <Input id="record-naptr-service" v-model="form.naptrService" placeholder="sip+E2U"
+                  :class="recordFormErrors.naptrService && 'border-destructive focus-visible:ring-destructive'" />
+                <p v-if="recordFormErrors.naptrService" class="text-xs text-destructive">
+                  {{ recordFormErrors.naptrService }}
+                </p>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-naptr-regexp">Regular Expression</Label>
+              <Input id="record-naptr-regexp" v-model="form.naptrRegexp" placeholder="!^.*$!sip:info@example.com!"
+                :class="recordFormErrors.naptrRegexp && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.naptrRegexp" class="text-xs text-destructive">
+                {{ recordFormErrors.naptrRegexp }}
+              </p>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-naptr-replacement">Replacement</Label>
+              <Input id="record-naptr-replacement" v-model="form.naptrReplacement" placeholder=". or hostname"
+                :class="recordFormErrors.naptrReplacement && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.naptrReplacement" class="text-xs text-destructive">
+                {{ recordFormErrors.naptrReplacement }}
+              </p>
+            </div>
+          </template>
+
+          <!-- LOC -->
+          <template v-if="form.type === 'LOC'">
+            <p class="text-xs font-medium text-muted-foreground">Latitude</p>
+            <div class="grid gap-4 sm:grid-cols-4">
+              <div class="space-y-2">
+                <Label for="record-loc-lat-deg">Degrees</Label>
+                <Input id="record-loc-lat-deg" v-model.number="form.locLatDeg" type="number" min="0" max="90" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-lat-min">Minutes</Label>
+                <Input id="record-loc-lat-min" v-model.number="form.locLatMin" type="number" min="0" max="59" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-lat-sec">Seconds</Label>
+                <Input id="record-loc-lat-sec" v-model="form.locLatSec" placeholder="0.000" />
+              </div>
+              <div class="space-y-2">
+                <Label>Hemisphere</Label>
+                <Select :model-value="form.locLatHem" @update:model-value="setSelectString('locLatHem', $event)">
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in LOC_HEMISPHERES.filter((h) => h.value === 'N' || h.value === 'S')"
+                      :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p class="text-xs font-medium text-muted-foreground">Longitude</p>
+            <div class="grid gap-4 sm:grid-cols-4">
+              <div class="space-y-2">
+                <Label for="record-loc-lon-deg">Degrees</Label>
+                <Input id="record-loc-lon-deg" v-model.number="form.locLonDeg" type="number" min="0" max="180" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-lon-min">Minutes</Label>
+                <Input id="record-loc-lon-min" v-model.number="form.locLonMin" type="number" min="0" max="59" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-lon-sec">Seconds</Label>
+                <Input id="record-loc-lon-sec" v-model="form.locLonSec" placeholder="0.000" />
+              </div>
+              <div class="space-y-2">
+                <Label>Hemisphere</Label>
+                <Select :model-value="form.locLonHem" @update:model-value="setSelectString('locLonHem', $event)">
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="opt in LOC_HEMISPHERES.filter((h) => h.value === 'E' || h.value === 'W')"
+                      :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="record-loc-alt">Altitude</Label>
+                <Input id="record-loc-alt" v-model="form.locAltitude" placeholder="0.00m" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-size">Size</Label>
+                <Input id="record-loc-size" v-model="form.locSize" placeholder="1m" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-horiz">Horizontal Precision</Label>
+                <Input id="record-loc-horiz" v-model="form.locHorizPre" placeholder="10000m" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-loc-vert">Vertical Precision</Label>
+                <Input id="record-loc-vert" v-model="form.locVertPre" placeholder="10m" />
+              </div>
+            </div>
+          </template>
+
+          <!-- URI -->
+          <template v-if="form.type === 'URI'">
+            <div class="grid gap-4 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label for="record-uri-priority">Priority</Label>
+                <Input id="record-uri-priority" v-model.number="form.uriPriority" type="number" min="0" />
+              </div>
+              <div class="space-y-2">
+                <Label for="record-uri-weight">Weight</Label>
+                <Input id="record-uri-weight" v-model.number="form.uriWeight" type="number" min="0" />
+              </div>
+            </div>
+            <div class="space-y-2">
+              <Label for="record-uri-target">Target URI</Label>
+              <Input id="record-uri-target" v-model="form.uriTarget" placeholder="https://example.com/path"
+                :class="recordFormErrors.uriTarget && 'border-destructive focus-visible:ring-destructive'" />
+              <p v-if="recordFormErrors.uriTarget" class="text-xs text-destructive">
+                {{ recordFormErrors.uriTarget }}
+              </p>
+            </div>
+          </template>
+
+          <!-- SOA -->
+          <template v-if="form.type === 'SOA'">
             <div class="space-y-2">
               <Label for="record-soa-primary-ns">Primary NS (MNAME)</Label>
               <Input id="record-soa-primary-ns" v-model="form.soaPrimaryNS" placeholder="ns1.example.com"
