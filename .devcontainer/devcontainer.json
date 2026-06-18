@@ -38,7 +38,8 @@
         "tamasfe.even-better-toml",
         "yzhang.markdown-all-in-one",
         "davidanson.vscode-markdownlint",
-        "bierner.markdown-mermaid"
+        "bierner.markdown-mermaid",
+        "vue.volar"
       ],
       "settings": {
         "go.useLanguageServer": true,
