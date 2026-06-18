@@ -56,7 +56,82 @@ const form = ref({
   ttl: 3600,
 })
 
+type RecordFormErrors = {
+  name?: string
+  value?: string
+  ttl?: string
+}
+
+const recordFormErrors = ref<RecordFormErrors>({})
+
 const selectedOrigin = computed(() => selectedZone.value?.origin ?? '')
+
+const fqdnPreview = computed(() => {
+  const name = form.value.name
+  const zoneName = selectedZone.value ? formatOrigin(selectedOrigin.value) : ''
+
+  if (!name.trim()) {
+    return 'Enter @ for root'
+  }
+  if (!zoneName) {
+    return '—'
+  }
+  if (name.trim() === '@') {
+    return zoneName
+  }
+  return `${name.trim()}.${zoneName}`
+})
+
+function clearRecordFieldError(field: keyof RecordFormErrors): void {
+  if (!recordFormErrors.value[field]) {
+    return
+  }
+  const next = { ...recordFormErrors.value }
+  delete next[field]
+  recordFormErrors.value = next
+}
+
+function validateRecordForm(): boolean {
+  const errors: RecordFormErrors = {}
+  const name = form.value.name.trim()
+  const value = form.value.value.trim()
+
+  if (!name) {
+    errors.name = 'Name is required. Use @ for the zone apex.'
+  } else if (name !== '@') {
+    if (name.includes('..')) {
+      errors.name = 'Name cannot contain consecutive dots.'
+    } else if (!/^[a-zA-Z0-9_*.-]+$/.test(name)) {
+      errors.name = 'Name contains invalid characters.'
+    } else {
+      for (const label of name.split('.')) {
+        if (!label) {
+          errors.name = 'Name cannot contain empty labels.'
+          break
+        }
+        if (label.length > 63) {
+          errors.name = 'Each label must be 63 characters or fewer.'
+          break
+        }
+        if (label.startsWith('-') || label.endsWith('-')) {
+          errors.name = 'Labels cannot start or end with a hyphen.'
+          break
+        }
+      }
+    }
+  }
+
+  if (!value) {
+    errors.value = 'Value is required.'
+  }
+
+  if (!Number.isFinite(form.value.ttl) || form.value.ttl < 1) {
+    errors.ttl = 'TTL must be at least 1.'
+  }
+
+  recordFormErrors.value = errors
+  return Object.keys(errors).length === 0
+}
 
 function formatOrigin(origin: string): string {
   return origin.replace(/\.$/, '')
@@ -125,6 +200,7 @@ function resetForm(): void {
     value: '',
     ttl: 3600,
   }
+  recordFormErrors.value = {}
 }
 
 function openAddDialog(): void {
@@ -196,6 +272,10 @@ async function submitRecord(): Promise<void> {
     return
   }
 
+  if (!validateRecordForm()) {
+    return
+  }
+
   submitting.value = true
   error.value = null
   try {
@@ -240,6 +320,21 @@ async function removeRecord(record: ZoneRecord): Promise<void> {
 watch(selectedZone, () => {
   void loadRecords()
 })
+
+watch(
+  () => form.value.name,
+  () => clearRecordFieldError('name'),
+)
+
+watch(
+  () => form.value.value,
+  () => clearRecordFieldError('value'),
+)
+
+watch(
+  () => form.value.ttl,
+  () => clearRecordFieldError('ttl'),
+)
 
 onMounted(async () => {
   await loadZones()
@@ -506,15 +601,31 @@ onMounted(async () => {
           </DialogDescription>
         </DialogHeader>
 
-        <form class="space-y-4" @submit.prevent="submitRecord">
+        <form class="space-y-4" novalidate @submit.prevent="submitRecord">
           <div class="space-y-2">
             <Label for="record-name">Name</Label>
             <Input
               id="record-name"
               v-model="form.name"
               placeholder="www or @"
-              required
+              :class="recordFormErrors.name && 'border-destructive focus-visible:ring-destructive'"
+              :aria-invalid="recordFormErrors.name ? true : undefined"
+              :aria-describedby="recordFormErrors.name ? 'record-name-error' : 'record-name-preview'"
             />
+            <p
+              id="record-name-preview"
+              class="text-xs text-muted-foreground"
+              :class="recordFormErrors.name && 'sr-only'"
+            >
+              Resolves to: {{ fqdnPreview }}
+            </p>
+            <p
+              v-if="recordFormErrors.name"
+              id="record-name-error"
+              class="text-xs text-destructive"
+            >
+              {{ recordFormErrors.name }}
+            </p>
           </div>
 
           <div class="space-y-2">
@@ -523,7 +634,6 @@ onMounted(async () => {
               id="record-type"
               v-model="form.type"
               class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              required
             >
               <option v-for="recordType in RECORD_TYPES" :key="recordType" :value="recordType">
                 {{ recordType }}
@@ -537,8 +647,17 @@ onMounted(async () => {
               id="record-value"
               v-model="form.value"
               placeholder="IP address or target hostname"
-              required
+              :class="recordFormErrors.value && 'border-destructive focus-visible:ring-destructive'"
+              :aria-invalid="recordFormErrors.value ? true : undefined"
+              :aria-describedby="recordFormErrors.value ? 'record-value-error' : undefined"
             />
+            <p
+              v-if="recordFormErrors.value"
+              id="record-value-error"
+              class="text-xs text-destructive"
+            >
+              {{ recordFormErrors.value }}
+            </p>
           </div>
 
           <div class="space-y-2">
@@ -547,9 +666,17 @@ onMounted(async () => {
               id="record-ttl"
               v-model.number="form.ttl"
               type="number"
-              min="1"
-              required
+              :class="recordFormErrors.ttl && 'border-destructive focus-visible:ring-destructive'"
+              :aria-invalid="recordFormErrors.ttl ? true : undefined"
+              :aria-describedby="recordFormErrors.ttl ? 'record-ttl-error' : undefined"
             />
+            <p
+              v-if="recordFormErrors.ttl"
+              id="record-ttl-error"
+              class="text-xs text-destructive"
+            >
+              {{ recordFormErrors.ttl }}
+            </p>
           </div>
 
           <DialogFooter>

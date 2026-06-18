@@ -33,8 +33,8 @@ The API client (`src/api/client.ts`) reads `localStorage.getItem('arx_token')` a
 | Path          | View       | Description                                                                                                                                                                                                                                                                                                                                                 |
 | ------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/`           | Dashboard  | Live telemetry cards (Total Queries with Local · Upstream breakdown and ratio bar), responsive `sm:grid-cols-2 xl:grid-cols-4` stat grid, time-window controls (Live / 5m / 1h / 30d), and rolling QPS / cache-hit charts with `HH:MM:SS` x-axis timestamps; Live mode polls `GET /api/v1/stats` every 2s, historical windows fetch once from SQLite rollup |
-| `/zones`      | Zones      | Zone sidebar with **Add Zone**, record table, **Add Record** / **Delete Zone** dialogs, and per-row record delete |
-| `/blocklists` | Blocklists | Placeholder for blocklist management                                                                                                                                                                                                                                                                                                                        |
+| `/zones`      | Zones      | Zone sidebar with **Add Zone**, record table, **Add Record** / **Delete Zone** dialogs (Add Record shows instant `Resolves to:` FQDN preview on every keystroke; validation runs only on submit), and per-row record delete |
+| `/blocklists` | Blocklists | Live `blocked_domains_count` stat card, remote feed source table, **Add List** dialog, and **Update Gravity / Sync** (calls `POST /api/v1/firewall/sync`) |
 | `/settings`   | Settings   | Placeholder for server settings                                                                                                                                                                                                                                                                                                                             |
 | `/login`      | Login      | Bearer token entry (public route)                                                                                                                                                                                                                                                                                                                           |
 
@@ -44,6 +44,7 @@ The API client (`src/api/client.ts`) reads `localStorage.getItem('arx_token')` a
 | ------------------- | ------------------------------------------------------------------------------------ |
 | `src/api/client.ts` | Generic `fetch` wrapper with Bearer auth, zone list/record CRUD, and zone create/delete helpers |
 | `src/api/stats.ts`  | `StatsSnapshot` / `StatsHistoryPoint` types, `fetchStats()`, and `getStatsHistory()` |
+| `src/api/firewall.ts` | Blocklist source CRUD, firewall status, and sync helpers |
 
 ## Adding components
 
