@@ -77,6 +77,10 @@ func OpenDB(dataDir string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := db.migrateBlocklistSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := db.migrateMetricsRollup(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -142,7 +146,15 @@ func (db *DB) initMainSchema() error {
 CREATE TABLE IF NOT EXISTS blocklist_sources (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	url TEXT NOT NULL UNIQUE,
-	enabled INTEGER NOT NULL DEFAULT 1
+	description TEXT,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	last_count INTEGER NOT NULL DEFAULT 0,
+	last_sync DATETIME
+);
+CREATE TABLE IF NOT EXISTS blocklist_custom (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	domain TEXT NOT NULL UNIQUE,
+	created_at DATETIME NOT NULL
 );
 `
 
@@ -151,6 +163,82 @@ CREATE TABLE IF NOT EXISTS blocklist_sources (
 	}
 
 	return nil
+}
+
+func (db *DB) migrateBlocklistSchema() error {
+	columns, err := db.mainTableColumns("blocklist_sources")
+	if err != nil {
+		return err
+	}
+
+	alterations := []struct {
+		name string
+		ddl  string
+	}{
+		{
+			name: "last_count",
+			ddl:  `ALTER TABLE blocklist_sources ADD COLUMN last_count INTEGER NOT NULL DEFAULT 0;`,
+		},
+		{
+			name: "last_sync",
+			ddl:  `ALTER TABLE blocklist_sources ADD COLUMN last_sync DATETIME;`,
+		},
+		{
+			name: "description",
+			ddl:  `ALTER TABLE blocklist_sources ADD COLUMN description TEXT;`,
+		},
+	}
+
+	for _, alteration := range alterations {
+		if columns[alteration.name] {
+			continue
+		}
+		if _, err := db.main.Exec(alteration.ddl); err != nil {
+			return fmt.Errorf("migrate blocklist_sources column %s: %w", alteration.name, err)
+		}
+	}
+
+	const customSchema = `
+CREATE TABLE IF NOT EXISTS blocklist_custom (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	domain TEXT NOT NULL UNIQUE,
+	created_at DATETIME NOT NULL
+);
+`
+	if _, err := db.main.Exec(customSchema); err != nil {
+		return fmt.Errorf("migrate blocklist_custom table: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) mainTableColumns(table string) (map[string]bool, error) {
+	rows, err := db.main.Query(`PRAGMA table_info(` + table + `);`)
+	if err != nil {
+		return nil, fmt.Errorf("pragma table_info %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			primaryKey int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &primaryKey); err != nil {
+			return nil, fmt.Errorf("scan table_info row: %w", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate table_info rows: %w", err)
+	}
+
+	return columns, nil
 }
 
 func (db *DB) migrateMetricsRollup() error {
