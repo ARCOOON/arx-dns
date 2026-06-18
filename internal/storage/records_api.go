@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 
 	mdns "github.com/miekg/dns"
@@ -14,7 +15,7 @@ type ZoneRecordEntry struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Type  string `json:"type"`
-	TTL   uint32 `json:"ttl"`
+	TTL   string `json:"ttl"`
 	Value string `json:"value"`
 }
 
@@ -54,7 +55,7 @@ func (m *Memory) ListZoneRecordEntries(origin string, view ZoneView) ([]ZoneReco
 			ID:    ComputeRecordID(origin, rr),
 			Name:  relativeOwnerName(hdr.Name, origin),
 			Type:  mdns.Type(hdr.Rrtype).String(),
-			TTL:   hdr.Ttl,
+			TTL:   m.recordTTLText(origin, view, rr),
 			Value: rrDataValue(rr),
 		})
 	}
@@ -81,11 +82,13 @@ func (m *Memory) DeleteZoneRecordByID(zonesDir, origin string, view ZoneView, id
 	}
 
 	rrs := collectZoneRecords(m.treeForView(view), origin)
+	var matchRR mdns.RR
 	var match *ZoneRecordEntry
 	for _, rr := range rrs {
 		if ComputeRecordID(origin, rr) != id {
 			continue
 		}
+		matchRR = rr
 		hdr := rr.Header()
 		match = &ZoneRecordEntry{
 			Name:  relativeOwnerName(hdr.Name, origin),
@@ -113,6 +116,8 @@ func (m *Memory) DeleteZoneRecordByID(zonesDir, origin string, view ZoneView, id
 		return ErrRecordNotFound
 	}
 
+	m.ttlHints.remove(origin, view, matchRR)
+
 	if view == ViewInternal {
 		m.SwapInternalTree(tree)
 	} else {
@@ -123,11 +128,18 @@ func (m *Memory) DeleteZoneRecordByID(zonesDir, origin string, view ZoneView, id
 	if err != nil {
 		return err
 	}
-	if err := WriteZoneFile(path, origin, tree); err != nil {
+	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
 		return fmt.Errorf("persist zone file: %w", err)
 	}
 
 	return nil
+}
+
+func (m *Memory) recordTTLText(origin string, view ZoneView, rr mdns.RR) string {
+	if text := m.ttlHints.get(origin, view, rr); text != "" {
+		return text
+	}
+	return strconv.FormatUint(uint64(rr.Header().Ttl), 10)
 }
 
 // UpdateZoneRecordByID replaces a record identified by ComputeRecordID with new data.
@@ -142,11 +154,6 @@ func (m *Memory) UpdateZoneRecordByID(zonesDir, origin string, view ZoneView, id
 		return nil, fmt.Errorf("record id is required")
 	}
 
-	rr, err := BuildRecord(origin, in)
-	if err != nil {
-		return nil, err
-	}
-
 	m.mutateMu.Lock()
 	defer m.mutateMu.Unlock()
 
@@ -155,21 +162,34 @@ func (m *Memory) UpdateZoneRecordByID(zonesDir, origin string, view ZoneView, id
 	}
 
 	rrs := collectZoneRecords(m.treeForView(view), origin)
-	var match *ZoneRecordEntry
+	var existingRR mdns.RR
 	for _, existing := range rrs {
 		if ComputeRecordID(origin, existing) != id {
 			continue
 		}
-		hdr := existing.Header()
-		match = &ZoneRecordEntry{
-			Name:  relativeOwnerName(hdr.Name, origin),
-			Type:  mdns.Type(hdr.Rrtype).String(),
-			Value: rrDataValue(existing),
-		}
+		existingRR = existing
 		break
 	}
-	if match == nil {
+	if existingRR == nil {
 		return nil, ErrRecordNotFound
+	}
+
+	hdr := existingRR.Header()
+	match := &ZoneRecordEntry{
+		Name:  relativeOwnerName(hdr.Name, origin),
+		Type:  mdns.Type(hdr.Rrtype).String(),
+		Value: rrDataValue(existingRR),
+	}
+
+	if strings.EqualFold(strings.TrimSpace(in.Type), "SOA") {
+		if err := preserveSOASerial(existingRR, &in); err != nil {
+			return nil, err
+		}
+	}
+
+	rr, err := BuildRecord(origin, in)
+	if err != nil {
+		return nil, err
 	}
 
 	qtype, err := parseRecordType(match.Type)
@@ -187,7 +207,9 @@ func (m *Memory) UpdateZoneRecordByID(zonesDir, origin string, view ZoneView, id
 		return nil, ErrRecordNotFound
 	}
 
+	m.ttlHints.remove(origin, view, existingRR)
 	insertRR(tree, rr)
+	m.ttlHints.set(origin, view, rr, in.TTLText)
 
 	if view == ViewInternal {
 		m.SwapInternalTree(tree)
@@ -199,9 +221,25 @@ func (m *Memory) UpdateZoneRecordByID(zonesDir, origin string, view ZoneView, id
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteZoneFile(path, origin, tree); err != nil {
+	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
 		return nil, fmt.Errorf("persist zone file: %w", err)
 	}
 
 	return rr, nil
+}
+
+func preserveSOASerial(existing mdns.RR, in *RecordInput) error {
+	soa, ok := existing.(*mdns.SOA)
+	if !ok {
+		return fmt.Errorf("existing record is not SOA")
+	}
+
+	fields := strings.Fields(strings.TrimSpace(in.Value))
+	if len(fields) < 7 {
+		return fmt.Errorf("SOA value must be ns mbox serial refresh retry expire minimum")
+	}
+
+	fields[2] = strconv.FormatUint(uint64(soa.Serial), 10)
+	in.Value = strings.Join(fields, " ")
+	return nil
 }

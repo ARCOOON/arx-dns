@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/armon/go-radix"
@@ -79,6 +80,7 @@ func (m *Memory) AddZoneRecord(zonesDir, origin string, view ZoneView, in Record
 
 	tree := cloneTree(m.treeForView(view))
 	insertRR(tree, rr)
+	m.ttlHints.set(origin, view, rr, in.TTLText)
 
 	if view == ViewInternal {
 		m.SwapInternalTree(tree)
@@ -90,7 +92,7 @@ func (m *Memory) AddZoneRecord(zonesDir, origin string, view ZoneView, in Record
 	if err != nil {
 		return nil, err
 	}
-	if err := WriteZoneFile(path, origin, tree); err != nil {
+	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
 		return nil, fmt.Errorf("persist zone file: %w", err)
 	}
 
@@ -141,7 +143,7 @@ func (m *Memory) DeleteZoneRecord(zonesDir, origin string, view ZoneView, in Rec
 	if err != nil {
 		return err
 	}
-	if err := WriteZoneFile(path, origin, tree); err != nil {
+	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
 		return fmt.Errorf("persist zone file: %w", err)
 	}
 
@@ -173,7 +175,7 @@ func (m *Memory) zoneFilePath(zonesDir, origin string, view ZoneView) (string, e
 }
 
 // WriteZoneFile serializes all records for origin from tree into a BIND zone file.
-func WriteZoneFile(path, origin string, tree *radix.Tree) error {
+func WriteZoneFile(path, origin string, tree *radix.Tree, ttlHints map[string]string) error {
 	origin = NormalizeName(origin)
 	rrs := collectZoneRecords(tree, origin)
 	if len(rrs) == 0 {
@@ -210,7 +212,7 @@ func WriteZoneFile(path, origin string, tree *radix.Tree) error {
 	b.WriteString(fmt.Sprintf("$TTL %d\n", defaultTTL))
 
 	for _, rr := range rrs {
-		line, err := formatZoneLine(rr, origin)
+		line, err := formatZoneLine(rr, origin, ttlHints[ComputeRecordID(origin, rr)])
 		if err != nil {
 			return err
 		}
@@ -234,7 +236,7 @@ func WriteZoneFile(path, origin string, tree *radix.Tree) error {
 	return nil
 }
 
-func formatZoneLine(rr mdns.RR, origin string) (string, error) {
+func formatZoneLine(rr mdns.RR, origin, ttlText string) (string, error) {
 	if rr == nil {
 		return "", fmt.Errorf("nil record")
 	}
@@ -242,13 +244,17 @@ func formatZoneLine(rr mdns.RR, origin string) (string, error) {
 	hdr := rr.Header()
 	owner := relativeOwnerName(hdr.Name, origin)
 	rdata := rrDataValue(rr)
+	ttl := ttlText
+	if ttl == "" {
+		ttl = strconv.FormatUint(uint64(hdr.Ttl), 10)
+	}
 
 	if r3597, ok := rr.(*mdns.RFC3597); ok {
 		typ := fmt.Sprintf("TYPE%d", r3597.Hdr.Rrtype)
 		if rdata == "" {
 			return "", fmt.Errorf("empty rdata for %s %s", owner, typ)
 		}
-		return fmt.Sprintf("%s %d IN %s %s", owner, hdr.Ttl, typ, rdata), nil
+		return fmt.Sprintf("%s %s IN %s %s", owner, ttl, typ, rdata), nil
 	}
 
 	typ := mdns.Type(hdr.Rrtype).String()
@@ -261,9 +267,9 @@ func formatZoneLine(rr mdns.RR, origin string) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("invalid SOA record")
 		}
-		return fmt.Sprintf("%s %d IN SOA %s %s (\n\t%d ; serial\n\t%d ; refresh\n\t%d ; retry\n\t%d ; expire\n\t%d ; minimum\n\t)",
+		return fmt.Sprintf("%s %s IN SOA %s %s (\n\t%d ; serial\n\t%d ; refresh\n\t%d ; retry\n\t%d ; expire\n\t%d ; minimum\n\t)",
 			owner,
-			hdr.Ttl,
+			ttl,
 			soa.Ns,
 			soa.Mbox,
 			soa.Serial,
@@ -279,10 +285,10 @@ func formatZoneLine(rr mdns.RR, origin string) (string, error) {
 		if rdata == "" {
 			return "", fmt.Errorf("empty rdata for %s TXT", owner)
 		}
-		return fmt.Sprintf("%s %d IN TXT %s", owner, hdr.Ttl, rdata), nil
+		return fmt.Sprintf("%s %s IN TXT %s", owner, ttl, rdata), nil
 	}
 
-	return fmt.Sprintf("%s %d IN %s %s", owner, hdr.Ttl, typ, rdata), nil
+	return fmt.Sprintf("%s %s IN %s %s", owner, ttl, typ, rdata), nil
 }
 
 func relativeOwnerName(name, origin string) string {
@@ -330,7 +336,7 @@ func (m *Memory) ApplyDynamicUpdate(zonesDir, origin string, view ZoneView, appl
 	if err != nil {
 		return err
 	}
-	if err := WriteZoneFile(path, origin, tree); err != nil {
+	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
 		return fmt.Errorf("persist zone file: %w", err)
 	}
 	return nil

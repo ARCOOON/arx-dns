@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,11 +13,50 @@ import (
 
 // RecordInput is the JSON payload for creating or deleting a DNS record via the API.
 type RecordInput struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	TTL   uint32 `json:"ttl"`
-	Value string `json:"value"`
-	View  string `json:"view,omitempty"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	TTL     uint32 `json:"-"`
+	TTLText string `json:"-"`
+	Value   string `json:"value"`
+	View    string `json:"view,omitempty"`
+}
+
+// UnmarshalJSON accepts ttl as a BIND string ("1h", "5m") or a plain number.
+func (in *RecordInput) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Name  string          `json:"name"`
+		Type  string          `json:"type"`
+		Value string          `json:"value"`
+		TTL   json.RawMessage `json:"ttl"`
+		View  string          `json:"view,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	in.Name = raw.Name
+	in.Type = raw.Type
+	in.Value = raw.Value
+	in.View = raw.View
+	in.TTL = 0
+	in.TTLText = ""
+
+	if len(raw.TTL) == 0 {
+		return nil
+	}
+
+	var ttlNumber uint32
+	if err := json.Unmarshal(raw.TTL, &ttlNumber); err == nil {
+		in.TTL = ttlNumber
+		return nil
+	}
+
+	var ttlString string
+	if err := json.Unmarshal(raw.TTL, &ttlString); err != nil {
+		return fmt.Errorf("ttl must be a number or BIND TTL string")
+	}
+	in.TTLText = strings.TrimSpace(ttlString)
+	return nil
 }
 
 // BuildRecord constructs a dns.RR from zone-relative API input.
@@ -36,10 +76,12 @@ func BuildRecord(zoneOrigin string, in RecordInput) (mdns.RR, error) {
 		return nil, fmt.Errorf("record value is required")
 	}
 
-	ttl := in.TTL
-	if ttl == 0 {
-		ttl = 300
+	ttl, ttlText, err := ResolveRecordTTL(in)
+	if err != nil {
+		return nil, err
 	}
+	in.TTL = ttl
+	in.TTLText = ttlText
 
 	switch typ {
 	case "MX":
@@ -343,11 +385,11 @@ func parseSOAValue(value string) (ns, mbox string, serial, refresh, retry, expir
 }
 
 func parseSOAField(raw, field string) (uint32, error) {
-	n, err := strconv.ParseUint(raw, 10, 32)
+	seconds, _, err := ParseBindTTL(raw)
 	if err != nil {
 		return 0, fmt.Errorf("invalid SOA %s %q", field, raw)
 	}
-	return uint32(n), nil
+	return seconds, nil
 }
 
 func parseMXValue(value string) (uint16, string, error) {

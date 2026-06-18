@@ -30,12 +30,16 @@ type Memory struct {
 	public   atomic.Value // holds *radix.Tree
 	internal atomic.Value // holds *radix.Tree
 	registry *zoneRegistry
+	ttlHints *ttlHintStore
 	mutateMu sync.Mutex
 }
 
 // NewMemory creates an empty in-memory store with public and internal views.
 func NewMemory() *Memory {
-	m := &Memory{registry: newZoneRegistry()}
+	m := &Memory{
+		registry: newZoneRegistry(),
+		ttlHints: newTTLHintStore(),
+	}
 	m.public.Store(radix.New())
 	m.internal.Store(radix.New())
 	return m
