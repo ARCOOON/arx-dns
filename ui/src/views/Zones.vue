@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, Plus, Trash2 } from 'lucide-vue-next'
 import {
   ApiError,
+  createZone,
   createZoneRecord,
+  deleteZone,
   deleteZoneRecord,
   fetchZoneRecords,
   fetchZones,
@@ -39,8 +41,13 @@ const loadingZones = ref(true)
 const loadingRecords = ref(false)
 const error = ref<string | null>(null)
 const dialogOpen = ref(false)
+const addZoneDialogOpen = ref(false)
+const deleteZoneDialogOpen = ref(false)
 const submitting = ref(false)
+const creatingZone = ref(false)
+const deletingZone = ref(false)
 const deletingId = ref<string | null>(null)
+const newZoneName = ref('')
 
 const form = ref({
   name: '',
@@ -125,6 +132,65 @@ function openAddDialog(): void {
   dialogOpen.value = true
 }
 
+function openAddZoneDialog(): void {
+  newZoneName.value = ''
+  addZoneDialogOpen.value = true
+}
+
+function openDeleteZoneDialog(): void {
+  deleteZoneDialogOpen.value = true
+}
+
+async function submitZone(): Promise<void> {
+  const name = newZoneName.value.trim()
+  if (!name) {
+    return
+  }
+
+  creatingZone.value = true
+  error.value = null
+  try {
+    await createZone(name, 'public')
+    addZoneDialogOpen.value = false
+    newZoneName.value = ''
+    await loadZones()
+    const created = zones.value.find(
+      (zone) =>
+        formatOrigin(zone.origin).toLowerCase() === name.toLowerCase() &&
+        zone.view === 'public',
+    )
+    if (created) {
+      selectedZone.value = created
+    }
+    await loadRecords()
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Failed to create zone'
+  } finally {
+    creatingZone.value = false
+  }
+}
+
+async function confirmDeleteZone(): Promise<void> {
+  if (!selectedZone.value) {
+    return
+  }
+
+  deletingZone.value = true
+  error.value = null
+  try {
+    await deleteZone(selectedZone.value.origin, selectedZone.value.view)
+    deleteZoneDialogOpen.value = false
+    selectedZone.value = null
+    records.value = []
+    await loadZones()
+    await loadRecords()
+  } catch (err) {
+    error.value = err instanceof ApiError ? err.message : 'Failed to delete zone'
+  } finally {
+    deletingZone.value = false
+  }
+}
+
 async function submitRecord(): Promise<void> {
   if (!selectedZone.value) {
     return
@@ -190,13 +256,23 @@ onMounted(async () => {
           Manage authoritative DNS zones and records.
         </p>
       </div>
-      <Button
-        :disabled="!selectedZone || loadingRecords"
-        @click="openAddDialog"
-      >
-        <Plus class="size-4" />
-        Add Record
-      </Button>
+      <div class="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          :disabled="!selectedZone || deletingZone"
+          @click="openDeleteZoneDialog"
+        >
+          <Trash2 class="size-4 text-destructive" />
+          Delete Zone
+        </Button>
+        <Button
+          :disabled="!selectedZone || loadingRecords"
+          @click="openAddDialog"
+        >
+          <Plus class="size-4" />
+          Add Record
+        </Button>
+      </div>
     </div>
 
     <p
@@ -209,8 +285,22 @@ onMounted(async () => {
     <div class="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
       <Card class="h-fit">
         <CardHeader class="pb-3">
-          <CardTitle class="text-base">Zones</CardTitle>
-          <CardDescription>Loaded authoritative zones</CardDescription>
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle class="text-base">Zones</CardTitle>
+              <CardDescription>Loaded authoritative zones</CardDescription>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            class="mt-2 w-full"
+            :disabled="creatingZone"
+            @click="openAddZoneDialog"
+          >
+            <Plus class="size-4" />
+            Add Zone
+          </Button>
         </CardHeader>
         <CardContent class="p-0">
           <div v-if="loadingZones" class="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
@@ -329,6 +419,80 @@ onMounted(async () => {
         </CardContent>
       </Card>
     </div>
+
+    <Dialog v-model:open="addZoneDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Zone</DialogTitle>
+          <DialogDescription>
+            Create a new authoritative DNS zone. A valid SOA record is written automatically.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form class="space-y-4" @submit.prevent="submitZone">
+          <div class="space-y-2">
+            <Label for="zone-name">Domain name</Label>
+            <Input
+              id="zone-name"
+              v-model="newZoneName"
+              placeholder="example.com"
+              required
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              :disabled="creatingZone"
+              @click="addZoneDialogOpen = false"
+            >
+              Cancel
+            </Button>
+            <Button type="submit" :disabled="creatingZone">
+              <Loader2 v-if="creatingZone" class="size-4 animate-spin" />
+              Create Zone
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="deleteZoneDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete Zone</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete this entire zone? This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+
+        <p v-if="selectedZone" class="text-sm">
+          Zone:
+          <span class="font-medium">{{ formatOrigin(selectedOrigin) }}</span>
+          ({{ selectedZone.view }} view)
+        </p>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            :disabled="deletingZone"
+            @click="deleteZoneDialogOpen = false"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            :disabled="deletingZone"
+            @click="confirmDeleteZone"
+          >
+            <Loader2 v-if="deletingZone" class="size-4 animate-spin" />
+            Delete Zone
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog v-model:open="dialogOpen">
       <DialogContent>

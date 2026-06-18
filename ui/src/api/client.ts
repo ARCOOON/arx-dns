@@ -125,6 +125,27 @@ export function fetchZones(): Promise<ZonesListResponse> {
   return apiRequest<ZonesListResponse>('/api/v1/zones')
 }
 
+export function createZone(
+  name: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<{ status: string; message: string; zone?: string }> {
+  return apiRequest('/api/v1/zones', {
+    method: 'POST',
+    body: { name, view },
+  })
+}
+
+export function deleteZone(
+  origin: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<{ status: string; message: string }> {
+  const params = new URLSearchParams({ view })
+  return apiRequest(
+    `/api/v1/zones/${zonePath(origin)}?${params.toString()}`,
+    { method: 'DELETE' },
+  )
+}
+
 export function fetchZoneRecords(
   origin: string,
   view: 'public' | 'internal' = 'public',
