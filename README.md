@@ -22,7 +22,7 @@ Strictly adheres to KISS and DRY principles. Uses `github.com/panjf2000/gnet/v2`
 | `internal/config/`    | Unified TOML configuration loading, validation, and default generation                                                                                                                                                                                                                                                                                                              |
 | `internal/network/`   | gnet UDP/TCP reactors with `SO_REUSEPORT`, dual-stack bind, DoT/DoH encrypted listeners, per-client-IP response rate limiting (RRL), and source-IP ACL matching                                                                                                                                                                                                                     |
 | `internal/dnsproc/`   | DNS message parse/serialize, RFC 1035 name compression on all outgoing responses, authoritative response builder, split-DNS view resolution, CNAME chain resolution, RFC 8482 ANY mitigation, ACL enforcement, firewall interception, Active Directory local NXDOMAIN optimization, upstream forwarding, autonomous root-hint fetch and iterative resolution, and DNSSEC validation |
-| `internal/firewall/`  | Reversed-domain radix blocklist engine, flat-file loader, and fsnotify hot-reload                                                                                                                                                                                                                                                                                                   |
+| `internal/firewall/`  | Reversed-domain radix blocklist engine (`blocklist.go` parsing), flat-file loader, fsnotify hot-reload, and `GET /api/v1/firewall/status` |
 | `internal/storage/`   | Thread-safe dual-view in-memory radix-tree zone store, BIND zone loader, fsnotify hot-reload, and TTL-aware upstream response cache                                                                                                                                                                                                                                                 |
 | `internal/telemetry/` | Lock-free atomic counters (`sync/atomic`) for operations stats                                                                                                                                                                                                                                                                                                                      |
 | `internal/api/`       | Management HTTP/HTTPS API for health checks, telemetry, zone listing, record CRUD, zone reload, audit logging, embedded WebUI, and zone parameter validation                                                                                                                                                                                                                        |
@@ -112,7 +112,7 @@ npm run dev    # Vite dev server (default http://127.0.0.1:5173)
 
 Stack: Vue 3, TypeScript, Vite, Tailwind CSS v4, shadcn-vue (radix-vue primitives), chart.js + vue-chartjs (Dashboard QPS and cache-hit line charts; live polling or SQLite-backed historical windows: Live / 5m / 1h / 30d; x-axis formats `HH:MM:SS`, `HH:MM`, or `DD.MM.`), OKLCH theme tokens, Noto Sans headings, Source Sans 3 body text. Add components with `npx shadcn-vue@latest add <component>`.
 
-The **Zones** view (`/zones`) provides a split layout: zone list sidebar (public/internal views) and a record table for the selected zone. Use **Add Record** to open a Dialog modal (Name, Type, Value, TTL) and the row delete action to remove records by stable API `id`.
+The **Zones** view (`/zones`) provides a split layout: zone list sidebar with **Add Zone** (creates a new domain via `POST /api/v1/zones`), record table for the selected zone, **Add Record** dialog (Name, Type, Value, TTL), per-row record delete, and **Delete Zone** with a strict confirmation dialog (`DELETE /api/v1/zones/{zone}`).
 
 During `npm run dev`, Vite proxies `/api` to `http://127.0.0.1:8080` so the WebUI can call the management API without CORS issues. Store the API bearer token in `localStorage` under the key `arx_token` (the login screen sets this automatically).
 
@@ -273,7 +273,7 @@ Root hints for iterative resolution are configured under `[resolver]`. They are 
 | `resolver.qname_minimization`     | `true`                                        | In iterative mode, send minimized QNAMEs with QTYPE `NS` during delegation walks (RFC 7816)                                                                                            |
 | `resolver.root_hints_file`        | `./data/named.root`                           | Path to the IANA root hints zone file used for iterative resolution                                                                                                                    |
 | `resolver.auto_update_root_hints` | `true`                                        | When `true`, download or refresh the root hints file from InterNIC when missing or older than 30 days; when `false`, read only the local file (for Ansible/Puppet-managed deployments) |
-| `firewall.blocklists_directory`   | `./blocklists`                                | Directory containing plain-text domain blocklists (one domain per line)                                                                                                                |
+| `firewall.blocklists_directory`   | `./blocklists`                                | Directory containing plain-text domain blocklists or HOSTS-formatted lists                                                                                                             |
 | `firewall.block_action`           | `NXDOMAIN`                                    | Firewall action for blocked domains: `NXDOMAIN` or `ZEROIP`                                                                                                                            |
 | `security.dnssec_validation`      | `true`                                        | Cryptographically validate DNSSEC signatures on forwarded upstream responses                                                                                                           |
 | `security.dns_cookies_enabled`    | `true`                                        | Enable RFC 7873 DNS Cookies on EDNS0 OPT records to mitigate spoofing and cache poisoning                                                                                              |
@@ -448,7 +448,7 @@ Before cache or authoritative resolution, every query is checked against blockli
 
 | Key                             | Default        | Behavior                                                                                |
 | ------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
-| `firewall.blocklists_directory` | `./blocklists` | Directory of flat text files; one domain per line; `#` comments and blank lines ignored |
+| `firewall.blocklists_directory` | `./blocklists` | Directory of blocklist files; plain domain lists or HOSTS format (`0.0.0.0 domain`); `#` comments and blank lines ignored |
 | `firewall.block_action`         | `NXDOMAIN`     | `NXDOMAIN` returns RCODE 3; `ZEROIP` returns `A` → `0.0.0.0` or `AAAA` → `::`           |
 
 Blocklist files are hot-reloaded via `fsnotify` with the same 500ms debounce and atomic tree swap pattern as zone files. Firewall matches take precedence over authoritative zones and the upstream cache.
@@ -456,9 +456,13 @@ Blocklist files are hot-reloaded via `fsnotify` with the same 500ms debounce and
 Example blocklist file (`blocklists/ads.list`):
 
 ```text
-# Tracking and ad domains
+# Tracking and ad domains (plain domain list)
 doubleclick.net
 ads.example.com
+
+# HOSTS format is also supported
+0.0.0.0 tracker.example.net
+127.0.0.1 localhost.localdomain localhost
 ```
 
 Verify blocking:
@@ -699,7 +703,10 @@ A lightweight HTTP REST API (`internal/api`) runs alongside the DNS reactors. It
 | `/metrics`                          | GET    | None   | Prometheus text exposition of all `telemetry.Stats` counters                                        |
 | `/api/v1/stats`                     | GET    | Bearer | JSON snapshot of all `telemetry.Stats` counters (live in-memory totals)                             |
 | `/api/v1/stats/history`             | GET    | Bearer | Aggregated telemetry time series from `data/state.db` (`?range=5m`, `1h`, or `30d`; `window` alias) |
+| `/api/v1/firewall/status`           | GET    | Bearer | JSON snapshot of loaded blocklist size (`{"blocked_domains_count":145023}`)                        |
 | `/api/v1/zones`                     | GET    | Bearer | JSON list of loaded authoritative zones (public and internal views)                                 |
+| `/api/v1/zones`                     | POST   | Bearer | Create a new zone; writes `<name>.zone` with a valid SOA record (`{"name":"example.com"}`)          |
+| `/api/v1/zones/{zone}`              | DELETE | Bearer | Delete the zone and its `.zone` file (`?view=public` or `internal`, default `public`)               |
 | `/api/v1/zones/reload`              | POST   | Bearer | Force zone reload (same logic as fsnotify watcher)                                                  |
 | `/api/v1/zones/{zone}/records`      | GET    | Bearer | List all DNS records in the zone (`?view=public` or `internal`, default `public`)                   |
 | `/api/v1/zones/{zone}/records`      | POST   | Bearer | Create a DNS record in the given zone; persists to the BIND `.zone` file                            |
@@ -760,8 +767,14 @@ Every `POST` and `DELETE` request emits an immutable structured audit log via `s
 ```bash
 curl -s http://127.0.0.1:8080/health
 curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/stats
+curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/firewall/status
 curl -s -H 'Authorization: Bearer dev-token-change-me' 'http://127.0.0.1:8080/api/v1/stats/history?range=5m'
 curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones
+curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
+  -d '{"name":"example.com"}' \
+  http://127.0.0.1:8080/api/v1/zones
+curl -s -X DELETE -H 'Authorization: Bearer dev-token-change-me' \
+  http://127.0.0.1:8080/api/v1/zones/example.com
 curl -s -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones/arx.local/records
 curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' http://127.0.0.1:8080/api/v1/zones/reload
 curl -s -X POST -H 'Authorization: Bearer dev-token-change-me' -H 'Content-Type: application/json' \
