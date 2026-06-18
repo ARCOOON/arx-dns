@@ -332,5 +332,8 @@ func decodeRecordInput(body io.Reader) (storage.RecordInput, error) {
 	if strings.TrimSpace(in.Type) == "" {
 		return storage.RecordInput{}, errors.New("record type is required")
 	}
+	if _, _, err := storage.ResolveRecordTTL(in); err != nil {
+		return storage.RecordInput{}, err
+	}
 	return in, nil
 }
