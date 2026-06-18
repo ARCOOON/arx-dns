@@ -57,6 +57,12 @@ func (e *Engine) SwapTree(tree *radix.Tree) {
 	e.tree.Store(tree)
 }
 
+// BlockedDomainsCount returns the number of unique domains currently loaded.
+func (e *Engine) BlockedDomainsCount() int {
+	tree := e.tree.Load().(*radix.Tree)
+	return tree.Len()
+}
+
 // Blocked reports whether name matches any loaded blocklist entry, including
 // subdomains of a listed apex (e.g. blocking example.com also blocks ads.example.com).
 func (e *Engine) Blocked(name string) bool {

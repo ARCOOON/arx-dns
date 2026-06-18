@@ -1,27 +1,23 @@
 package firewall
 
 import (
-	"bufio"
-	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/armon/go-radix"
 
 	"github.com/ARCOOON/arx-dns/internal/config"
 )
 
-// Load reads all regular files in cfg.BlocklistsDirectory (one domain per line),
-// builds a fresh radix tree, and atomically swaps it into the engine.
+// Load reads all regular files in cfg.BlocklistsDirectory (HOSTS-formatted or plain
+// domain lists), builds a fresh radix tree, and atomically swaps it into the engine.
 func Load(cfg config.FirewallConfig, engine *Engine, logger *slog.Logger) {
 	LoadFromDir(cfg.BlocklistsDirectory, engine, logger)
 }
 
-// LoadFromDir reads all regular files in dir (one domain per line), builds a
-// fresh radix tree, and atomically swaps it into the engine.
+// LoadFromDir reads all regular files in dir, builds a fresh radix tree, and
+// atomically swaps it into the engine.
 func LoadFromDir(dir string, engine *Engine, logger *slog.Logger) {
 	if engine == nil {
 		return
@@ -63,7 +59,7 @@ func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 		}
 
 		path := filepath.Join(dir, entry.Name())
-		count, err := loadBlocklistFile(path, tree)
+		count, err := LoadBlocklistFile(path, tree)
 		if err != nil {
 			logger.Error("skipped malformed blocklist file", "path", path, "error", err)
 			skipped++
@@ -74,53 +70,4 @@ func buildTreeFromDir(dir string, logger *slog.Logger) (*radix.Tree, int, int) {
 	}
 
 	return tree, loaded, skipped
-}
-
-func loadBlocklistFile(path string, tree *radix.Tree) (int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return 0, fmt.Errorf("open blocklist: %w", err)
-	}
-	defer f.Close()
-
-	return ingestBlocklist(f, tree)
-}
-
-func ingestBlocklist(r io.Reader, tree *radix.Tree) (int, error) {
-	scanner := bufio.NewScanner(r)
-	var count int
-
-	for scanner.Scan() {
-		domain := parseBlocklistLine(scanner.Text())
-		if domain == "" {
-			continue
-		}
-
-		reversed := ReverseDomain(domain)
-		if reversed == "" {
-			continue
-		}
-
-		if _, ok := tree.Get(reversed); ok {
-			continue
-		}
-		tree.Insert(reversed, struct{}{})
-		count++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return count, fmt.Errorf("read blocklist: %w", err)
-	}
-	return count, nil
-}
-
-func parseBlocklistLine(line string) string {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return ""
-	}
-	if idx := strings.IndexByte(line, '#'); idx >= 0 {
-		line = strings.TrimSpace(line[:idx])
-	}
-	return line
 }
