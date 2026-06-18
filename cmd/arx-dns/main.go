@@ -207,7 +207,7 @@ func main() {
 		"xfr_allowed_subnets", cfg.XFR.AllowedSubnets,
 		"notify_slaves", cfg.XFR.NotifySlaves,
 	)
-	apiServer := api.New(cfg, stats, telemetryDB, store, notifier, logger)
+	apiServer := api.New(cfg, stats, telemetryDB, store, fw, notifier, logger)
 	startService("api", apiServer.Run)
 	startService("udp", reactors.UDP.Run)
 	startService("tcp", reactors.TCP.Run)
