@@ -73,6 +73,10 @@ func OpenDB(dataDir string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := db.initMainSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := db.migrateMetricsRollup(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -128,6 +132,22 @@ CREATE INDEX IF NOT EXISTS idx_metrics_rollup_timestamp ON metrics_rollup(timest
 
 	if _, err := db.state.Exec(schema); err != nil {
 		return fmt.Errorf("initialize state schema: %w", err)
+	}
+
+	return nil
+}
+
+func (db *DB) initMainSchema() error {
+	const schema = `
+CREATE TABLE IF NOT EXISTS blocklist_sources (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	url TEXT NOT NULL UNIQUE,
+	enabled INTEGER NOT NULL DEFAULT 1
+);
+`
+
+	if _, err := db.main.Exec(schema); err != nil {
+		return fmt.Errorf("initialize main schema: %w", err)
 	}
 
 	return nil
@@ -199,7 +219,7 @@ func (db *DB) State() *sql.DB {
 	return db.state
 }
 
-// Main returns the placeholder zone-management database handle.
+// Main returns the main application database handle (blocklist sources and future zone backend).
 func (db *DB) Main() *sql.DB {
 	return db.main
 }
