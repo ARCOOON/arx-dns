@@ -4,11 +4,16 @@ import { Loader2, Plus, RefreshCw, ShieldBan, Trash2 } from 'lucide-vue-next'
 import { ApiError } from '@/api/client'
 import {
   createBlocklistSource,
+  createCustomBlocklistDomain,
   deleteBlocklistSource,
+  deleteCustomBlocklistDomain,
   fetchBlocklistSources,
+  fetchCustomBlocklist,
   fetchFirewallStatus,
   syncBlocklists,
+  updateBlocklistSource,
   type BlocklistSource,
+  type CustomBlocklistEntry,
 } from '@/api/firewall'
 import { Button } from '@/components/ui/button'
 import {
@@ -28,20 +33,31 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const STATUS_POLL_MS = 2000
 const SYNC_POLL_MAX_MS = 120000
 
 const sources = ref<BlocklistSource[]>([])
+const customDomains = ref<CustomBlocklistEntry[]>([])
 const blockedCount = ref<number | null>(null)
 const loadingSources = ref(true)
+const loadingCustom = ref(true)
 const loadingStatus = ref(true)
-const syncing = ref(false)
+const isSyncing = ref(false)
+const isSyncPolling = ref(false)
 const error = ref<string | null>(null)
-const addDialogOpen = ref(false)
+const addSourceDialogOpen = ref(false)
+const addCustomDialogOpen = ref(false)
 const newSourceURL = ref('')
-const creating = ref(false)
-const deletingId = ref<number | null>(null)
+const newSourceDescription = ref('')
+const newCustomDomain = ref('')
+const creatingSource = ref(false)
+const creatingCustom = ref(false)
+const deletingSourceId = ref<number | null>(null)
+const deletingCustomId = ref<number | null>(null)
+const togglingSourceId = ref<number | null>(null)
 
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 let syncPollTimer: ReturnType<typeof setInterval> | null = null
@@ -49,6 +65,20 @@ let syncStopTimer: ReturnType<typeof setTimeout> | null = null
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) {
+    return '—'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
 }
 
 function parseApiError(err: unknown, fallback: string): string {
@@ -75,11 +105,23 @@ function clearSyncPolling(): void {
     clearTimeout(syncStopTimer)
     syncStopTimer = null
   }
+  isSyncPolling.value = false
 }
 
-function stopSyncing(): void {
-  clearSyncPolling()
-  syncing.value = false
+function pauseStatusPolling(): void {
+  if (statusPollTimer !== null) {
+    clearInterval(statusPollTimer)
+    statusPollTimer = null
+  }
+}
+
+function resumeStatusPolling(): void {
+  if (isSyncing.value || isSyncPolling.value || statusPollTimer !== null) {
+    return
+  }
+  statusPollTimer = setInterval(() => {
+    void loadStatus()
+  }, STATUS_POLL_MS)
 }
 
 async function loadStatus(): Promise<void> {
@@ -94,30 +136,43 @@ async function loadStatus(): Promise<void> {
   }
 }
 
-async function loadSources(): Promise<void> {
-  loadingSources.value = true
+async function loadSources(silent = false): Promise<void> {
+  if (!silent) {
+    loadingSources.value = true
+  }
   try {
     const response = await fetchBlocklistSources()
     sources.value = response.sources
   } catch (err) {
     error.value = parseApiError(err, 'Failed to load blocklist sources')
   } finally {
-    loadingSources.value = false
+    if (!silent) {
+      loadingSources.value = false
+    }
   }
 }
 
-function startStatusPolling(): void {
-  if (statusPollTimer !== null) {
-    return
+async function loadCustomDomains(): Promise<void> {
+  loadingCustom.value = true
+  try {
+    const response = await fetchCustomBlocklist()
+    customDomains.value = response.domains
+  } catch (err) {
+    error.value = parseApiError(err, 'Failed to load custom blocklist domains')
+  } finally {
+    loadingCustom.value = false
   }
-  statusPollTimer = setInterval(() => {
-    void loadStatus()
-  }, STATUS_POLL_MS)
 }
 
-function openAddDialog(): void {
+function openAddSourceDialog(): void {
   newSourceURL.value = ''
-  addDialogOpen.value = true
+  newSourceDescription.value = ''
+  addSourceDialogOpen.value = true
+}
+
+function openAddCustomDialog(): void {
+  newCustomDomain.value = ''
+  addCustomDialogOpen.value = true
 }
 
 async function submitSource(): Promise<void> {
@@ -126,22 +181,43 @@ async function submitSource(): Promise<void> {
     return
   }
 
-  creating.value = true
+  creatingSource.value = true
   error.value = null
   try {
-    await createBlocklistSource(url)
-    addDialogOpen.value = false
+    await createBlocklistSource(url, newSourceDescription.value.trim() || undefined)
+    addSourceDialogOpen.value = false
     newSourceURL.value = ''
+    newSourceDescription.value = ''
     await loadSources()
   } catch (err) {
     error.value = parseApiError(err, 'Failed to add blocklist source')
   } finally {
-    creating.value = false
+    creatingSource.value = false
+  }
+}
+
+async function submitCustomDomain(): Promise<void> {
+  const domain = newCustomDomain.value.trim()
+  if (!domain) {
+    return
+  }
+
+  creatingCustom.value = true
+  error.value = null
+  try {
+    await createCustomBlocklistDomain(domain)
+    addCustomDialogOpen.value = false
+    newCustomDomain.value = ''
+    await Promise.all([loadCustomDomains(), loadStatus()])
+  } catch (err) {
+    error.value = parseApiError(err, 'Failed to add custom blocklist domain')
+  } finally {
+    creatingCustom.value = false
   }
 }
 
 async function removeSource(source: BlocklistSource): Promise<void> {
-  deletingId.value = source.id
+  deletingSourceId.value = source.id
   error.value = null
   try {
     await deleteBlocklistSource(source.id)
@@ -149,46 +225,83 @@ async function removeSource(source: BlocklistSource): Promise<void> {
   } catch (err) {
     error.value = parseApiError(err, 'Failed to delete blocklist source')
   } finally {
-    deletingId.value = null
+    deletingSourceId.value = null
+  }
+}
+
+async function toggleSourceEnabled(source: BlocklistSource, enabled: boolean): Promise<void> {
+  togglingSourceId.value = source.id
+  error.value = null
+  const previous = source.enabled
+  source.enabled = enabled
+  try {
+    const response = await updateBlocklistSource(source.id, { enabled })
+    if (response.source) {
+      const index = sources.value.findIndex((item) => item.id === source.id)
+      if (index >= 0) {
+        sources.value[index] = response.source
+      }
+    }
+    await loadStatus()
+  } catch (err) {
+    source.enabled = previous
+    error.value = parseApiError(err, 'Failed to update blocklist source')
+  } finally {
+    togglingSourceId.value = null
+  }
+}
+
+async function removeCustomDomain(entry: CustomBlocklistEntry): Promise<void> {
+  deletingCustomId.value = entry.id
+  error.value = null
+  try {
+    await deleteCustomBlocklistDomain(entry.id)
+    await Promise.all([loadCustomDomains(), loadStatus()])
+  } catch (err) {
+    error.value = parseApiError(err, 'Failed to delete custom blocklist domain')
+  } finally {
+    deletingCustomId.value = null
   }
 }
 
 async function triggerSync(): Promise<void> {
-  if (syncing.value) {
+  if (isSyncing.value) {
     return
   }
 
-  syncing.value = true
+  isSyncing.value = true
   error.value = null
+  pauseStatusPolling()
   clearSyncPolling()
 
   try {
     await syncBlocklists()
+    isSyncPolling.value = true
     syncPollTimer = setInterval(() => {
-      void Promise.all([loadStatus(), loadSources()])
+      void Promise.all([loadStatus(), loadSources(true)])
     }, STATUS_POLL_MS)
     syncStopTimer = setTimeout(() => {
-      stopSyncing()
-      void Promise.all([loadStatus(), loadSources()])
+      clearSyncPolling()
+      resumeStatusPolling()
+      void Promise.all([loadStatus(), loadSources(true)])
     }, SYNC_POLL_MAX_MS)
   } catch (err) {
-    stopSyncing()
+    clearSyncPolling()
+    resumeStatusPolling()
     error.value = parseApiError(err, 'Failed to start blocklist sync')
+  } finally {
+    isSyncing.value = false
   }
 }
 
 onMounted(async () => {
-  await Promise.all([loadStatus(), loadSources()])
-  startStatusPolling()
+  await Promise.all([loadStatus(), loadSources(), loadCustomDomains()])
+  resumeStatusPolling()
 })
 
 onUnmounted(() => {
-  if (statusPollTimer !== null) {
-    clearInterval(statusPollTimer)
-    statusPollTimer = null
-  }
+  pauseStatusPolling()
   clearSyncPolling()
-  stopSyncing()
 })
 </script>
 
@@ -198,18 +311,22 @@ onUnmounted(() => {
       <div>
         <h1 class="font-heading text-2xl font-semibold tracking-tight">Blocklists</h1>
         <p class="text-sm text-muted-foreground">
-          Configure remote ad and malware feeds, then sync them into the local firewall.
+          Configure remote ad and malware feeds, custom rules, then sync into the local firewall.
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button variant="outline" :disabled="syncing" @click="triggerSync">
-          <Loader2 v-if="syncing" class="size-4 animate-spin" />
+        <Button variant="outline" :disabled="isSyncing" @click="triggerSync">
+          <Loader2 v-if="isSyncing" class="size-4 animate-spin" />
           <RefreshCw v-else class="size-4" />
-          Update Gravity / Sync
+          Update Feeds
         </Button>
-        <Button @click="openAddDialog">
+        <Button variant="outline" @click="openAddSourceDialog">
           <Plus class="size-4" />
-          Add List
+          Add Feed
+        </Button>
+        <Button @click="openAddCustomDialog">
+          <Plus class="size-4" />
+          Add Domain
         </Button>
       </div>
     </div>
@@ -227,91 +344,184 @@ onUnmounted(() => {
           <ShieldBan class="size-4 text-muted-foreground" />
           Blocked Domains
         </CardTitle>
-        <CardDescription>Unique domains loaded from all blocklist files</CardDescription>
+        <CardDescription>Unique domains loaded from remote feeds and custom rules</CardDescription>
       </CardHeader>
       <CardContent>
         <p class="font-heading text-3xl font-semibold tabular-nums">
           <template v-if="loadingStatus && blockedCount === null">—</template>
           <template v-else>{{ formatNumber(blockedCount ?? 0) }}</template>
         </p>
-        <p v-if="syncing" class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <p v-if="isSyncPolling" class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 class="size-3 animate-spin" />
           Syncing remote feeds...
         </p>
       </CardContent>
     </Card>
 
-    <Card>
-      <CardHeader class="pb-3">
-        <CardTitle class="text-base">Remote Sources</CardTitle>
-        <CardDescription>
-          HTTP(S) feeds downloaded into <code class="text-xs">./blocklists/</code> on sync
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div
-          v-if="loadingSources"
-          class="flex items-center gap-2 py-10 text-sm text-muted-foreground"
-        >
-          <Loader2 class="size-4 animate-spin" />
-          Loading sources...
-        </div>
-        <div
-          v-else-if="sources.length === 0"
-          class="py-10 text-center text-sm text-muted-foreground"
-        >
-          No remote blocklist sources configured. Add a feed URL to get started.
-        </div>
-        <div v-else class="overflow-x-auto">
-          <table class="w-full min-w-[640px] text-left text-sm">
-            <thead>
-              <tr class="border-b border-border text-muted-foreground">
-                <th class="px-3 py-2 font-medium">ID</th>
-                <th class="px-3 py-2 font-medium">URL</th>
-                <th class="px-3 py-2 font-medium">Status</th>
-                <th class="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="source in sources"
-                :key="source.id"
-                class="border-b border-border/70 last:border-0"
-              >
-                <td class="px-3 py-2 tabular-nums">{{ source.id }}</td>
-                <td class="max-w-xl truncate px-3 py-2 font-mono text-xs" :title="source.url">
-                  {{ source.url }}
-                </td>
-                <td class="px-3 py-2">
-                  <span
-                    :class="source.enabled ? 'text-foreground' : 'text-muted-foreground'"
-                  >
-                    {{ source.enabled ? 'Enabled' : 'Disabled' }}
-                  </span>
-                </td>
-                <td class="px-3 py-2 text-right">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :disabled="deletingId === source.id"
-                    :aria-label="`Delete source ${source.id}`"
-                    @click="removeSource(source)"
-                  >
-                    <Loader2
-                      v-if="deletingId === source.id"
-                      class="size-4 animate-spin"
-                    />
-                    <Trash2 v-else class="size-4 text-destructive" />
-                  </Button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-    </Card>
+    <Tabs default-value="feeds" class="w-full">
+      <TabsList>
+        <TabsTrigger value="feeds">Remote Feeds</TabsTrigger>
+        <TabsTrigger value="custom">Custom Rules</TabsTrigger>
+      </TabsList>
 
-    <Dialog v-model:open="addDialogOpen">
+      <TabsContent value="feeds">
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-base">Remote Sources</CardTitle>
+            <CardDescription>
+              HTTP(S) feeds downloaded into <code class="text-xs">./blocklists/</code> on sync
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div
+              v-if="loadingSources"
+              class="flex items-center gap-2 py-10 text-sm text-muted-foreground"
+            >
+              <Loader2 class="size-4 animate-spin" />
+              Loading sources...
+            </div>
+            <div
+              v-else-if="sources.length === 0"
+              class="py-10 text-center text-sm text-muted-foreground"
+            >
+              No remote blocklist sources configured. Add a feed URL to get started.
+            </div>
+            <div v-else class="overflow-x-auto">
+              <table class="w-full min-w-[760px] text-left text-sm">
+                <thead>
+                  <tr class="border-b border-border text-muted-foreground">
+                    <th class="px-3 py-2 font-medium">ID</th>
+                    <th class="px-3 py-2 font-medium">URL</th>
+                    <th class="px-3 py-2 font-medium">Domains</th>
+                    <th class="px-3 py-2 font-medium">Last Sync</th>
+                    <th class="px-3 py-2 font-medium">Enabled</th>
+                    <th class="px-3 py-2 text-right font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="source in sources"
+                    :key="source.id"
+                    class="border-b border-border/70 last:border-0"
+                  >
+                    <td class="px-3 py-2 tabular-nums">{{ source.id }}</td>
+                    <td class="max-w-xl px-3 py-2">
+                      <p class="truncate font-mono text-xs" :title="source.url">
+                        {{ source.url }}
+                      </p>
+                      <p
+                        v-if="source.description"
+                        class="mt-0.5 truncate text-xs text-muted-foreground"
+                        :title="source.description"
+                      >
+                        {{ source.description }}
+                      </p>
+                    </td>
+                    <td class="px-3 py-2 tabular-nums">
+                      {{ formatNumber(source.last_count ?? 0) }}
+                    </td>
+                    <td class="px-3 py-2 text-muted-foreground">
+                      {{ formatDateTime(source.last_sync) }}
+                    </td>
+                    <td class="px-3 py-2">
+                      <Switch
+                        :checked="source.enabled"
+                        :disabled="togglingSourceId === source.id"
+                        :aria-label="`Toggle source ${source.id}`"
+                        @update:checked="(enabled) => toggleSourceEnabled(source, enabled)"
+                      />
+                    </td>
+                    <td class="px-3 py-2 text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        :disabled="deletingSourceId === source.id"
+                        :aria-label="`Delete source ${source.id}`"
+                        @click="removeSource(source)"
+                      >
+                        <Loader2
+                          v-if="deletingSourceId === source.id"
+                          class="size-4 animate-spin"
+                        />
+                        <Trash2 v-else class="size-4 text-destructive" />
+                      </Button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="custom">
+        <Card>
+          <CardHeader class="pb-3">
+            <CardTitle class="text-base">Custom Rules</CardTitle>
+            <CardDescription>
+              Manually blocked domains applied immediately without a remote sync
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div
+              v-if="loadingCustom"
+              class="flex items-center gap-2 py-10 text-sm text-muted-foreground"
+            >
+              <Loader2 class="size-4 animate-spin" />
+              Loading custom domains...
+            </div>
+            <div
+              v-else-if="customDomains.length === 0"
+              class="py-10 text-center text-sm text-muted-foreground"
+            >
+              No custom blocklist domains configured. Add a domain to block it immediately.
+            </div>
+            <div v-else class="overflow-x-auto">
+              <table class="w-full min-w-[560px] text-left text-sm">
+                <thead>
+                  <tr class="border-b border-border text-muted-foreground">
+                    <th class="px-3 py-2 font-medium">ID</th>
+                    <th class="px-3 py-2 font-medium">Domain</th>
+                    <th class="px-3 py-2 font-medium">Created</th>
+                    <th class="px-3 py-2 text-right font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="entry in customDomains"
+                    :key="entry.id"
+                    class="border-b border-border/70 last:border-0"
+                  >
+                    <td class="px-3 py-2 tabular-nums">{{ entry.id }}</td>
+                    <td class="px-3 py-2 font-mono text-xs">{{ entry.domain }}</td>
+                    <td class="px-3 py-2 text-muted-foreground">
+                      {{ formatDateTime(entry.created_at) }}
+                    </td>
+                    <td class="px-3 py-2 text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        :disabled="deletingCustomId === entry.id"
+                        :aria-label="`Delete custom domain ${entry.domain}`"
+                        @click="removeCustomDomain(entry)"
+                      >
+                        <Loader2
+                          v-if="deletingCustomId === entry.id"
+                          class="size-4 animate-spin"
+                        />
+                        <Trash2 v-else class="size-4 text-destructive" />
+                      </Button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
+
+    <Dialog v-model:open="addSourceDialogOpen">
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add Blocklist Source</DialogTitle>
@@ -332,18 +542,67 @@ onUnmounted(() => {
             />
           </div>
 
+          <div class="space-y-2">
+            <Label for="source-description">Description (Optional)</Label>
+            <Input
+              id="source-description"
+              v-model="newSourceDescription"
+              type="text"
+              placeholder="e.g. Primary ad-blocking list"
+            />
+          </div>
+
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
-              :disabled="creating"
-              @click="addDialogOpen = false"
+              :disabled="creatingSource"
+              @click="addSourceDialogOpen = false"
             >
               Cancel
             </Button>
-            <Button type="submit" :disabled="creating">
-              <Loader2 v-if="creating" class="size-4 animate-spin" />
+            <Button type="submit" :disabled="creatingSource">
+              <Loader2 v-if="creatingSource" class="size-4 animate-spin" />
               Add Source
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="addCustomDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Custom Domain</DialogTitle>
+          <DialogDescription>
+            Block a domain immediately. Subdomains of the listed apex are also blocked.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form class="space-y-4" @submit.prevent="submitCustomDomain">
+          <div class="space-y-2">
+            <Label for="custom-domain">Domain</Label>
+            <Input
+              id="custom-domain"
+              v-model="newCustomDomain"
+              type="text"
+              placeholder="bad-site.com"
+              required
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              :disabled="creatingCustom"
+              @click="addCustomDialogOpen = false"
+            >
+              Cancel
+            </Button>
+            <Button type="submit" :disabled="creatingCustom">
+              <Loader2 v-if="creatingCustom" class="size-4 animate-spin" />
+              Add Domain
             </Button>
           </DialogFooter>
         </form>
