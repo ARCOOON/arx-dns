@@ -48,6 +48,12 @@ func auditMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 
 func auditAction(r *http.Request) string {
 	switch {
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/firewall/sync"):
+		return "sync_blocklists"
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/firewall/sources"):
+		return "create_blocklist_source"
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/firewall/sources/"):
+		return "delete_blocklist_source"
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/records"):
 		return "create_record"
 	case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/records"):
