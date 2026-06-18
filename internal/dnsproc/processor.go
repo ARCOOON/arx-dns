@@ -39,6 +39,7 @@ type Processor struct {
 	cache            *storage.ResponseCache
 	stats            *telemetry.Stats
 	acl              TrustedChecker
+	queryACL         *QueryAccessChecker
 	firewall         *firewall.Engine
 	dnssecValidation bool
 	validator        *DNSSECValidator
@@ -52,7 +53,7 @@ type Processor struct {
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolver, resolverMode string, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, logger *slog.Logger) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolver, resolverMode string, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, queryACL *QueryAccessChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, logger *slog.Logger) *Processor {
 	p := &Processor{
 		store:            store,
 		forwarder:        forwarder,
@@ -61,6 +62,7 @@ func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolv
 		cache:            cache,
 		stats:            stats,
 		acl:              acl,
+		queryACL:         queryACL,
 		firewall:         fw,
 		dnssecValidation: dnssecValidation,
 		cookies:          cookies,
@@ -123,6 +125,11 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 	req := new(mdns.Msg)
 	if err := req.Unpack(payload); err != nil {
 		return nil, err
+	}
+
+	if p.queryACL != nil && !p.queryACL.Allowed(client) {
+		cookieCtx := p.parseRequestCookie(req, client)
+		return p.queryACLRefusedResponse(req, limitUDP, client, cookieCtx)
 	}
 
 	cookieCtx := p.parseRequestCookie(req, client)
@@ -230,6 +237,19 @@ func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP boo
 		resp.Rcode = mdns.RcodeNameError
 	}
 
+	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+}
+
+func (p *Processor) queryACLRefusedResponse(req *mdns.Msg, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
+	if p.stats != nil {
+		p.stats.IncRefusedQueries()
+	}
+
+	resp := new(mdns.Msg)
+	resp.SetReply(req)
+	resp.RecursionAvailable = true
+	resp.Authoritative = false
+	resp.Rcode = mdns.RcodeRefused
 	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 }
 
