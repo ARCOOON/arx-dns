@@ -48,6 +48,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	telemetryDB, err := telemetry.OpenDB("./data")
+	if err != nil {
+		slog.Default().Error("failed to open telemetry databases", "error", err)
+		os.Exit(1)
+	}
+	defer telemetryDB.Close()
+
 	// Step 2: Load zones and blocklists.
 	store := storage.NewMemory()
 	storage.LoadZones(cfg.Zones, store, logger)
@@ -59,7 +66,7 @@ func main() {
 	}
 
 	fw := firewall.New(fwAction)
-	firewall.Load(cfg.Firewall, fw, logger)
+	firewall.Load(cfg.Firewall, telemetryDB.Main(), fw, logger)
 
 	// Step 3: Fetch/load root hints (falls back to built-in addresses on failure).
 	rootHints := dnsproc.LoadRootHints(
@@ -73,15 +80,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Step 4: Initialize response cache, telemetry databases, and shared runtime services.
+	// Step 4: Initialize response cache, telemetry workers, and shared runtime services.
 	stats := telemetry.New()
-
-	telemetryDB, err := telemetry.OpenDB("./data")
-	if err != nil {
-		logger.Error("failed to open telemetry databases", "error", err)
-		os.Exit(1)
-	}
-	defer telemetryDB.Close()
 
 	telemetry.StartWorkers(ctx, stats, telemetryDB, logger)
 
@@ -148,7 +148,7 @@ func main() {
 
 	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
 
-	if err := firewall.StartWatcher(ctx, cfg.Firewall, fw, logger); err != nil {
+	if err := firewall.StartWatcher(ctx, cfg.Firewall, telemetryDB.Main(), fw, logger); err != nil {
 		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
 		os.Exit(1)
 	}
