@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -17,11 +18,11 @@ const defaultReloadDebounce = 500 * time.Millisecond
 
 // StartWatcher watches cfg.BlocklistsDirectory for create, write, and remove
 // events on blocklist files and hot-reloads the firewall radix tree atomically.
-func StartWatcher(ctx context.Context, cfg config.FirewallConfig, engine *Engine, logger *slog.Logger) error {
-	return startWatcher(ctx, cfg.BlocklistsDirectory, engine, logger)
+func StartWatcher(ctx context.Context, cfg config.FirewallConfig, db *sql.DB, engine *Engine, logger *slog.Logger) error {
+	return startWatcher(ctx, cfg.BlocklistsDirectory, db, engine, logger)
 }
 
-func startWatcher(ctx context.Context, dir string, engine *Engine, logger *slog.Logger) error {
+func startWatcher(ctx context.Context, dir string, db *sql.DB, engine *Engine, logger *slog.Logger) error {
 	if engine == nil {
 		return nil
 	}
@@ -39,12 +40,12 @@ func startWatcher(ctx context.Context, dir string, engine *Engine, logger *slog.
 		return err
 	}
 
-	go runWatcher(ctx, watcher, dir, engine, logger, defaultReloadDebounce)
+	go runWatcher(ctx, watcher, dir, db, engine, logger, defaultReloadDebounce)
 	logger.Info("blocklist watcher started", "directory", dir, "debounce", defaultReloadDebounce.String())
 	return nil
 }
 
-func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, engine *Engine, logger *slog.Logger, debounce time.Duration) {
+func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, db *sql.DB, engine *Engine, logger *slog.Logger, debounce time.Duration) {
 	defer watcher.Close()
 
 	var (
@@ -52,7 +53,7 @@ func runWatcher(ctx context.Context, watcher *fsnotify.Watcher, dir string, engi
 		timer  *time.Timer
 		reload = func(trigger string) {
 			logger.Info("blocklist reload triggered", "directory", dir, "trigger", trigger)
-			LoadFromDir(dir, engine, logger)
+			LoadFromDirWithDB(dir, db, engine, logger)
 		}
 		scheduleReload = func(trigger string) {
 			mu.Lock()

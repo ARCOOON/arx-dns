@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/armon/go-radix"
 )
 
 const (
@@ -72,15 +74,34 @@ func SyncBlocklistSources(ctx context.Context, db *sql.DB, dir string, engine *E
 			)
 			continue
 		}
+
+		domainCount, countErr := countDomainsInFile(path)
+		if countErr != nil {
+			logger.Error("failed to count domains in blocklist feed",
+				"source_id", source.ID,
+				"url", source.URL,
+				"path", path,
+				"error", countErr,
+			)
+		} else if err := UpdateBlocklistSourceStats(db, source.ID, domainCount); err != nil {
+			logger.Error("failed to update blocklist source stats",
+				"source_id", source.ID,
+				"url", source.URL,
+				"domain_count", domainCount,
+				"error", err,
+			)
+		}
+
 		logger.Info("downloaded blocklist feed",
 			"source_id", source.ID,
 			"url", source.URL,
 			"path", path,
+			"domains", domainCount,
 		)
 	}
 
 	if engine != nil {
-		LoadFromDir(dir, engine, logger)
+		LoadFromDirWithDB(dir, db, engine, logger)
 	}
 
 	return nil
@@ -183,4 +204,13 @@ func downloadFeed(ctx context.Context, client *http.Client, sourceURL, path stri
 	}
 
 	return nil
+}
+
+func countDomainsInFile(path string) (int, error) {
+	tree := radix.New()
+	count, err := LoadBlocklistFile(path, tree)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
 }
