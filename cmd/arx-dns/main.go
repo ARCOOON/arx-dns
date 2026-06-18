@@ -146,7 +146,13 @@ func main() {
 		cookieEngine = network.NewCookieEngine(secret)
 	}
 
-	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
+	queryACL, err := dnsproc.NewQueryAccessChecker(telemetryDB.Main())
+	if err != nil {
+		logger.Error("failed to load query access ACL", "error", err)
+		os.Exit(1)
+	}
+
+	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, queryACL, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
 
 	if err := firewall.StartWatcher(ctx, cfg.Firewall, telemetryDB.Main(), fw, logger); err != nil {
 		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
@@ -207,7 +213,7 @@ func main() {
 		"xfr_allowed_subnets", cfg.XFR.AllowedSubnets,
 		"notify_slaves", cfg.XFR.NotifySlaves,
 	)
-	apiServer := api.New(cfg, stats, telemetryDB, store, fw, notifier, logger)
+	apiServer := api.New(cfg, stats, telemetryDB, store, fw, queryACL, notifier, logger)
 	startService("api", apiServer.Run)
 	startService("udp", reactors.UDP.Run)
 	startService("tcp", reactors.TCP.Run)
