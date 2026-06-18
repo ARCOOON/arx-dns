@@ -54,6 +54,10 @@ func auditAction(r *http.Request) string {
 		return "delete_record"
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/reload"):
 		return "reload_zones"
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/zones"):
+		return "create_zone"
+	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/zones/") && !strings.Contains(r.URL.Path, "/records"):
+		return "delete_zone"
 	default:
 		return strings.ToLower(r.Method) + " " + r.URL.Path
 	}

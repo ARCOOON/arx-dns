@@ -27,9 +27,97 @@ type recordResponse struct {
 	Type    string `json:"type,omitempty"`
 }
 
+type createZoneRequest struct {
+	Name string `json:"name"`
+	View string `json:"view,omitempty"`
+}
+
+type zoneMutationResponse struct {
+	Status  string           `json:"status"`
+	Message string           `json:"message"`
+	Zone    string           `json:"zone,omitempty"`
+	Info    *storage.ZoneInfo `json:"info,omitempty"`
+}
+
 func (s *Server) handleListZones(w http.ResponseWriter, _ *http.Request) {
 	zones := s.store.ListZones()
 	writeJSON(w, http.StatusOK, zonesListResponse{Zones: zones})
+}
+
+func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
+	var in createZoneRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "malformed JSON payload")
+		return
+	}
+
+	name := strings.TrimSpace(in.Name)
+	if err := storage.ValidateZoneName(name); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	view, err := storage.ParseZoneView(in.View)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	info, err := s.store.CreateZone(s.cfg.Zones.Directory, name, view)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrZoneAlreadyExists):
+			writeJSONError(w, http.StatusConflict, "zone already exists")
+		default:
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	if s.notifier != nil {
+		s.notifier.NotifyZone(info.Origin)
+	}
+
+	writeJSON(w, http.StatusCreated, zoneMutationResponse{
+		Status:  "created",
+		Message: "zone created",
+		Zone:    info.Origin,
+		Info:    &info,
+	})
+}
+
+func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
+	zone := strings.TrimSpace(r.PathValue("zone"))
+	if err := storage.ValidateZoneName(zone); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	view, err := storage.ParseZoneView(r.URL.Query().Get("view"))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err = s.store.DeleteZone(s.cfg.Zones.Directory, zone, view)
+	if err != nil {
+		if errors.Is(err, storage.ErrZoneNotFound) {
+			writeJSONError(w, http.StatusNotFound, "zone not found")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if s.notifier != nil {
+		s.notifier.NotifyZone(storage.NormalizeName(zone))
+	}
+
+	writeJSON(w, http.StatusOK, zoneMutationResponse{
+		Status:  "deleted",
+		Message: "zone deleted",
+		Zone:    storage.NormalizeName(zone),
+	})
 }
 
 func (s *Server) handleListZoneRecords(w http.ResponseWriter, r *http.Request) {

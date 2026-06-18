@@ -12,6 +12,7 @@ import (
 
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
+	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
@@ -25,13 +26,14 @@ type Server struct {
 	stats       *telemetry.Stats
 	telemetryDB *telemetry.DB
 	store       *storage.Memory
+	firewall    *firewall.Engine
 	notifier    dnsproc.ZoneChangeNotifier
 	logger      *slog.Logger
 	server      *http.Server
 }
 
 // New creates a management API server bound to cfg.API.Listen.
-func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, store *storage.Memory, notifier dnsproc.ZoneChangeNotifier, logger *slog.Logger) *Server {
+func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, store *storage.Memory, fw *firewall.Engine, notifier dnsproc.ZoneChangeNotifier, logger *slog.Logger) *Server {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -44,6 +46,7 @@ func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, s
 		stats:       stats,
 		telemetryDB: telemetryDB,
 		store:       store,
+		firewall:    fw,
 		notifier:    notifier,
 		logger:      logger,
 	}
@@ -55,7 +58,10 @@ func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, s
 	auth := bearerAuth(cfg.API.AuthToken)
 	mux.Handle("GET /api/v1/stats", auth(http.HandlerFunc(s.handleStats)))
 	mux.Handle("GET /api/v1/stats/history", auth(http.HandlerFunc(s.handleStatsHistory)))
+	mux.Handle("GET /api/v1/firewall/status", auth(http.HandlerFunc(s.handleFirewallStatus)))
 	mux.Handle("GET /api/v1/zones", auth(http.HandlerFunc(s.handleListZones)))
+	mux.Handle("POST /api/v1/zones", auth(http.HandlerFunc(s.handleCreateZone)))
+	mux.Handle("DELETE /api/v1/zones/{zone}", auth(http.HandlerFunc(s.handleDeleteZone)))
 	mux.Handle("GET /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleListZoneRecords)))
 	mux.Handle("POST /api/v1/zones/reload", auth(http.HandlerFunc(s.handleZonesReload)))
 	mux.Handle("POST /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleCreateRecord)))
