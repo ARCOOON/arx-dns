@@ -2,6 +2,7 @@
 
 ## 0. Project Scaffold & Tooling
 
+- [x] **Documentation wiki (Phase 49):** Refactored bloated `README.md` into minimal stub; distributed architecture, API reference, development guide, and roadmap across `wiki/` git submodule (`Home.md`, `Architecture.md`, `API-Reference.md`, `Development.md`, `Roadmap.md`).
 - [x] **Devcontainer:** Production-ready `.devcontainer/` with Go bookworm image, DNS utilities, port 53 UDP/TCP forwarding, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities.
 - [x] **Docker deployment (Phase 13):** Multi-stage `Dockerfile` (`golang:bookworm` builder, `scratch` runtime, `CGO_ENABLED=0`), `docker-compose.yml` with ports 53 UDP/TCP, 853 TCP (DoT), and 443 TCP (DoH), host `data/` volume mounts including `./data/certs`, `unless-stopped` restart, and `NET_ADMIN` / `NET_BIND_SERVICE` capabilities; Buildx-ready for `linux/amd64` and `linux/arm64`.
 - [x] **Smart build pipeline (Phase 40):** Root `Makefile` with `build-core` (`-tags noui`), `build-full` (`-tags webui`, depends on `ui/dist`), `build-tester`, cross-compilation matrix (`release-core`, `release-full`, `release-tester` for linux/windows/darwin × amd64/arm64 → `bin/`), conditional WebUI embedding via build tags (`ui/embed_webui.go`, `internal/api/webui_enabled.go` vs stub variants), `clean`, and awk-parsed `help` target.
