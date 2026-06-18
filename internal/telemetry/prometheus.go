@@ -50,6 +50,7 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "cache_misses_total", help: "Total number of forwarded queries that missed the response cache.", load: func(s Snapshot) float64 { return float64(s.CacheMisses) }},
 		{name: "negative_cache_hits_total", help: "Total number of forwarded NXDOMAIN or NODATA answers served from the response cache.", load: func(s Snapshot) float64 { return float64(s.NegativeCacheHits) }},
 		{name: "acl_rejected_total", help: "Total number of recursive queries denied because the client IP is untrusted.", load: func(s Snapshot) float64 { return float64(s.ACLRejected) }},
+		{name: "refused_queries_total", help: "Total number of DNS queries refused by the query access ACL.", load: func(s Snapshot) float64 { return float64(s.RefusedQueries) }},
 		{name: "truncated_responses_total", help: "Total number of UDP responses truncated with the TC bit set.", load: func(s Snapshot) float64 { return float64(s.TruncatedResponses) }},
 		{name: "tcp_timeouts_total", help: "Total number of TCP connections closed due to read-frame timeout.", load: func(s Snapshot) float64 { return float64(s.TCPTimeouts) }},
 		{name: "firewall_blocked_total", help: "Total number of queries blocked by the DNS firewall blocklist engine.", load: func(s Snapshot) float64 { return float64(s.FirewallBlocked) }},

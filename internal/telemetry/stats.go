@@ -26,6 +26,7 @@ type Stats struct {
 	cacheMisses             atomic.Uint64
 	negativeCacheHits       atomic.Uint64
 	aclRejected             atomic.Uint64
+	refusedQueries          atomic.Uint64
 	truncatedResponses      atomic.Uint64
 	tcpTimeouts             atomic.Uint64
 	firewallBlocked         atomic.Uint64
@@ -69,6 +70,7 @@ type Snapshot struct {
 	CacheMisses             uint64 `json:"cache_misses"`
 	NegativeCacheHits       uint64 `json:"negative_cache_hits"`
 	ACLRejected             uint64 `json:"acl_rejected"`
+	RefusedQueries          uint64 `json:"refused_queries"`
 	TruncatedResponses      uint64 `json:"truncated_responses"`
 	TCPTimeouts             uint64 `json:"tcp_timeouts"`
 	FirewallBlocked         uint64 `json:"firewall_blocked"`
@@ -108,6 +110,7 @@ func (s *Stats) Snapshot() Snapshot {
 		CacheMisses:             s.cacheMisses.Load(),
 		NegativeCacheHits:       s.negativeCacheHits.Load(),
 		ACLRejected:             s.aclRejected.Load(),
+		RefusedQueries:          s.refusedQueries.Load(),
 		TruncatedResponses:      s.truncatedResponses.Load(),
 		TCPTimeouts:             s.tcpTimeouts.Load(),
 		FirewallBlocked:         s.firewallBlocked.Load(),
@@ -211,6 +214,10 @@ func (s *Stats) IncNegativeCacheHit() {
 
 func (s *Stats) IncACLRejected() {
 	s.aclRejected.Add(1)
+}
+
+func (s *Stats) IncRefusedQueries() {
+	s.refusedQueries.Add(1)
 }
 
 func (s *Stats) IncTruncatedResponse() {

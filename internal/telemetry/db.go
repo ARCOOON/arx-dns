@@ -81,6 +81,10 @@ func OpenDB(dataDir string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := db.migrateACLSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := db.migrateMetricsRollup(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -156,6 +160,11 @@ CREATE TABLE IF NOT EXISTS blocklist_custom (
 	domain TEXT NOT NULL UNIQUE,
 	created_at DATETIME NOT NULL
 );
+CREATE TABLE IF NOT EXISTS acl_rules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	subnet TEXT NOT NULL UNIQUE,
+	description TEXT
+);
 `
 
 	if _, err := db.main.Exec(schema); err != nil {
@@ -209,6 +218,20 @@ CREATE TABLE IF NOT EXISTS blocklist_custom (
 		return fmt.Errorf("migrate blocklist_custom table: %w", err)
 	}
 
+	return nil
+}
+
+func (db *DB) migrateACLSchema() error {
+	const schema = `
+CREATE TABLE IF NOT EXISTS acl_rules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	subnet TEXT NOT NULL UNIQUE,
+	description TEXT
+);
+`
+	if _, err := db.main.Exec(schema); err != nil {
+		return fmt.Errorf("migrate acl_rules table: %w", err)
+	}
 	return nil
 }
 
