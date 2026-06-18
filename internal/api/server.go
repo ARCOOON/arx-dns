@@ -78,6 +78,7 @@ func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, s
 	mux.Handle("GET /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleListZoneRecords)))
 	mux.Handle("POST /api/v1/zones/reload", auth(http.HandlerFunc(s.handleZonesReload)))
 	mux.Handle("POST /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleCreateRecord)))
+	mux.Handle("PUT /api/v1/zones/{zone}/records/{id}", auth(http.HandlerFunc(s.handleUpdateRecord)))
 	mux.Handle("DELETE /api/v1/zones/{zone}/records/{id}", auth(http.HandlerFunc(s.handleDeleteRecord)))
 	mux.Handle("DELETE /api/v1/zones/{zone}/records", auth(http.HandlerFunc(s.handleDeleteRecord)))
 

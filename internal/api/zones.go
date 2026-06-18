@@ -33,9 +33,9 @@ type createZoneRequest struct {
 }
 
 type zoneMutationResponse struct {
-	Status  string           `json:"status"`
-	Message string           `json:"message"`
-	Zone    string           `json:"zone,omitempty"`
+	Status  string            `json:"status"`
+	Message string            `json:"message"`
+	Zone    string            `json:"zone,omitempty"`
 	Info    *storage.ZoneInfo `json:"info,omitempty"`
 }
 
@@ -186,6 +186,56 @@ func (s *Server) handleCreateRecord(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, recordResponse{
 		Status:  "created",
 		Message: "record added",
+		Name:    hdr.Name,
+		Type:    strings.ToUpper(strings.TrimSpace(in.Type)),
+	})
+}
+
+func (s *Server) handleUpdateRecord(w http.ResponseWriter, r *http.Request) {
+	zone := strings.TrimSpace(r.PathValue("zone"))
+	if err := storage.ValidateZoneName(zone); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	recordID := strings.TrimSpace(r.PathValue("id"))
+	if recordID == "" {
+		writeJSONError(w, http.StatusBadRequest, "record id is required")
+		return
+	}
+
+	in, err := decodeRecordInput(r.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	view, err := storage.ParseZoneView(in.View)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	rr, err := s.store.UpdateZoneRecordByID(s.cfg.Zones.Directory, zone, view, recordID, in)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrZoneNotFound):
+			writeJSONError(w, http.StatusNotFound, "zone not found")
+		case errors.Is(err, storage.ErrRecordNotFound):
+			writeJSONError(w, http.StatusNotFound, "record not found")
+		default:
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+
+	hdr := rr.Header()
+	if s.notifier != nil {
+		s.notifier.NotifyZone(zone)
+	}
+	writeJSON(w, http.StatusOK, recordResponse{
+		Status:  "updated",
+		Message: "record updated",
 		Name:    hdr.Name,
 		Type:    strings.ToUpper(strings.TrimSpace(in.Type)),
 	})

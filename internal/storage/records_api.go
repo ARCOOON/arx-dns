@@ -129,3 +129,79 @@ func (m *Memory) DeleteZoneRecordByID(zonesDir, origin string, view ZoneView, id
 
 	return nil
 }
+
+// UpdateZoneRecordByID replaces a record identified by ComputeRecordID with new data.
+func (m *Memory) UpdateZoneRecordByID(zonesDir, origin string, view ZoneView, id string, in RecordInput) (mdns.RR, error) {
+	if m == nil {
+		return nil, fmt.Errorf("memory store is nil")
+	}
+
+	origin = NormalizeName(origin)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("record id is required")
+	}
+
+	rr, err := BuildRecord(origin, in)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mutateMu.Lock()
+	defer m.mutateMu.Unlock()
+
+	if !m.zoneExistsLocked(origin, view) {
+		return nil, ErrZoneNotFound
+	}
+
+	rrs := collectZoneRecords(m.treeForView(view), origin)
+	var match *ZoneRecordEntry
+	for _, existing := range rrs {
+		if ComputeRecordID(origin, existing) != id {
+			continue
+		}
+		hdr := existing.Header()
+		match = &ZoneRecordEntry{
+			Name:  relativeOwnerName(hdr.Name, origin),
+			Type:  mdns.Type(hdr.Rrtype).String(),
+			Value: rrDataValue(existing),
+		}
+		break
+	}
+	if match == nil {
+		return nil, ErrRecordNotFound
+	}
+
+	qtype, err := parseRecordType(match.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	fqdn, err := qualifyRecordName(origin, match.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	tree := cloneTree(m.treeForView(view))
+	if !removeMatchingRR(tree, fqdn, qtype, match.Value) {
+		return nil, ErrRecordNotFound
+	}
+
+	insertRR(tree, rr)
+
+	if view == ViewInternal {
+		m.SwapInternalTree(tree)
+	} else {
+		m.SwapPublicTree(tree)
+	}
+
+	path, err := m.zoneFilePath(zonesDir, origin, view)
+	if err != nil {
+		return nil, err
+	}
+	if err := WriteZoneFile(path, origin, tree); err != nil {
+		return nil, fmt.Errorf("persist zone file: %w", err)
+	}
+
+	return rr, nil
+}
