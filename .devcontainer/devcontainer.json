@@ -11,7 +11,8 @@
   "runArgs": [
     "--cap-add=NET_ADMIN",
     "--cap-add=NET_BIND_SERVICE",
-    "--sysctl=net.ipv4.ip_unprivileged_port_start=0"
+    "--sysctl=net.ipv4.ip_unprivileged_port_start=0",
+    "--network=host"
   ],
   "appPort": [
     "53:53/udp",
