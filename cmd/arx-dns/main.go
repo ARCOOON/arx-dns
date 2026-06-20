@@ -38,7 +38,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	log, err := logger.New(cfg.Server.LogLevel)
+	telemetryDB, err := telemetry.OpenDB("./data")
+	if err != nil {
+		slog.Default().Error("failed to open telemetry databases", "error", err)
+		os.Exit(1)
+	}
+	defer telemetryDB.Close()
+
+	log, err := logger.New(cfg.Server.LogLevel, telemetryDB.Main())
 	if err != nil {
 		slog.Default().Error("invalid log level configuration", "log_level", cfg.Server.LogLevel, "error", err)
 		os.Exit(1)
@@ -47,13 +54,6 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	telemetryDB, err := telemetry.OpenDB("./data")
-	if err != nil {
-		slog.Default().Error("failed to open telemetry databases", "error", err)
-		os.Exit(1)
-	}
-	defer telemetryDB.Close()
 
 	// Step 2: Load zones and blocklists.
 	store := storage.NewMemory()
