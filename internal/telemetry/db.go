@@ -89,6 +89,10 @@ func OpenDB(dataDir string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := db.migrateConfigurationSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 
 	return db, nil
 }
@@ -231,6 +235,19 @@ CREATE TABLE IF NOT EXISTS acl_rules (
 `
 	if _, err := db.main.Exec(schema); err != nil {
 		return fmt.Errorf("migrate acl_rules table: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) migrateConfigurationSchema() error {
+	const schema = `
+CREATE TABLE IF NOT EXISTS configuration (
+	key TEXT NOT NULL PRIMARY KEY,
+	value TEXT NOT NULL
+);
+`
+	if _, err := db.main.Exec(schema); err != nil {
+		return fmt.Errorf("migrate configuration table: %w", err)
 	}
 	return nil
 }
