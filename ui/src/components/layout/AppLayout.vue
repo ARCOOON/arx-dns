@@ -3,6 +3,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import {
   LayoutDashboard,
   List,
+  ScrollText,
   Settings,
   ShieldBan,
 } from 'lucide-vue-next'
@@ -14,6 +15,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { to: '/zones', label: 'Zones & Records', icon: List, exact: false },
   { to: '/blocklists', label: 'Blocklists', icon: ShieldBan, exact: false },
+  { to: '/logs', label: 'Logs', icon: ScrollText, exact: false },
   { to: '/settings', label: 'Settings', icon: Settings, exact: false },
 ]
 

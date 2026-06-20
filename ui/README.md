@@ -20,6 +20,8 @@ npm run dev      # http://127.0.0.1:5173
 npm run build    # outputs to dist/ (required before go build)
 ```
 
+Route views are lazy-loaded via dynamic `import()` in `src/router/index.ts`, so Vite emits per-route chunks instead of one oversized bundle. `vite.config.ts` suppresses the upstream `@vueuse/core` `INVALID_ANNOTATION` Rolldown warning while keeping the default 500 kB chunk-size limit.
+
 ## Development API proxy
 
 `vite.config.ts` proxies `/api` to `http://127.0.0.1:8080` during `npm run dev`. Start the Go management API listener before using authenticated views.

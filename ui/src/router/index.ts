@@ -1,10 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import Blocklists from '@/views/Blocklists.vue'
-import Dashboard from '@/views/Dashboard.vue'
-import Login from '@/views/Login.vue'
-import Settings from '@/views/Settings.vue'
-import Zones from '@/views/Zones.vue'
+
+const Login = () => import('@/views/Login.vue')
+const Dashboard = () => import('@/views/Dashboard.vue')
+const Zones = () => import('@/views/Zones.vue')
+const Blocklists = () => import('@/views/Blocklists.vue')
+const Logs = () => import('@/views/Logs.vue')
+const Settings = () => import('@/views/Settings.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -33,6 +35,11 @@ const router = createRouter({
           path: 'blocklists',
           name: 'blocklists',
           component: Blocklists,
+        },
+        {
+          path: 'logs',
+          name: 'logs',
+          component: Logs,
         },
         {
           path: 'settings',
