@@ -273,6 +273,8 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 			writeJSONError(w, http.StatusNotFound, "zone not found")
 		case errors.Is(err, storage.ErrRecordNotFound):
 			writeJSONError(w, http.StatusNotFound, "record not found")
+		case errors.Is(err, storage.ErrSOANotDeletable):
+			writeJSONError(w, http.StatusBadRequest, err.Error())
 		default:
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 		}
@@ -305,6 +307,8 @@ func (s *Server) handleDeleteRecordByID(w http.ResponseWriter, r *http.Request, 
 			writeJSONError(w, http.StatusNotFound, "zone not found")
 		case errors.Is(err, storage.ErrRecordNotFound):
 			writeJSONError(w, http.StatusNotFound, "record not found")
+		case errors.Is(err, storage.ErrSOANotDeletable):
+			writeJSONError(w, http.StatusBadRequest, err.Error())
 		default:
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 		}
