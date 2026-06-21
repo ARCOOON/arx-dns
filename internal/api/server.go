@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ARCOOON/arx-dns/internal/config"
@@ -23,6 +24,9 @@ const shutdownTimeout = 10 * time.Second
 // and optionally the embedded management WebUI when built with -tags webui.
 type Server struct {
 	cfg         config.Config
+	cfgMu       sync.RWMutex
+	configPath  string
+	runtime     RuntimeConfigurator
 	stats       *telemetry.Stats
 	telemetryDB *telemetry.DB
 	store       *storage.Memory
@@ -34,7 +38,7 @@ type Server struct {
 }
 
 // New creates a management API server bound to cfg.API.Listen.
-func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, store *storage.Memory, fw *firewall.Engine, queryACL *dnsproc.QueryAccessChecker, notifier dnsproc.ZoneChangeNotifier, logger *slog.Logger) *Server {
+func New(cfg config.Config, configPath string, stats *telemetry.Stats, telemetryDB *telemetry.DB, store *storage.Memory, fw *firewall.Engine, queryACL *dnsproc.QueryAccessChecker, notifier dnsproc.ZoneChangeNotifier, runtime RuntimeConfigurator, logger *slog.Logger) *Server {
 	if stats == nil {
 		stats = telemetry.New()
 	}
@@ -44,6 +48,8 @@ func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, s
 
 	s := &Server{
 		cfg:         cfg,
+		configPath:  configPath,
+		runtime:     runtime,
 		stats:       stats,
 		telemetryDB: telemetryDB,
 		store:       store,
@@ -71,6 +77,7 @@ func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, s
 	mux.Handle("DELETE /api/v1/firewall/custom/{id}", auth(http.HandlerFunc(s.handleDeleteCustomBlocklist)))
 	mux.Handle("GET /api/v1/settings/acl", auth(http.HandlerFunc(s.handleListACLRules)))
 	mux.Handle("POST /api/v1/settings/acl", auth(http.HandlerFunc(s.handleCreateACLRule)))
+	mux.Handle("PUT /api/v1/settings/acl/{id}", auth(http.HandlerFunc(s.handleUpdateACLRule)))
 	mux.Handle("DELETE /api/v1/settings/acl/{id}", auth(http.HandlerFunc(s.handleDeleteACLRule)))
 	mux.Handle("GET /api/v1/zones", auth(http.HandlerFunc(s.handleListZones)))
 	mux.Handle("POST /api/v1/zones", auth(http.HandlerFunc(s.handleCreateZone)))
@@ -85,13 +92,16 @@ func New(cfg config.Config, stats *telemetry.Stats, telemetryDB *telemetry.DB, s
 	mux.Handle("GET /api/v1/logs/stream", bearerAuthOrQueryToken(cfg.API.AuthToken)(http.HandlerFunc(s.handleLogsStream)))
 	mux.Handle("GET /api/v1/logs/config", auth(http.HandlerFunc(s.handleLogsConfigGet)))
 	mux.Handle("PUT /api/v1/logs/config", auth(http.HandlerFunc(s.handleLogsConfigPut)))
+	mux.Handle("GET /api/v1/config", auth(http.HandlerFunc(s.handleConfigGet)))
+	mux.Handle("PUT /api/v1/config", auth(http.HandlerFunc(s.handleConfigPut)))
+	mux.Handle("GET /api/v1/audit", auth(http.HandlerFunc(s.handleAuditList)))
 
 	mux.HandleFunc("GET /{$}", handleWebUI)
 	mux.HandleFunc("GET /{path...}", handleWebUI)
 
 	s.server = &http.Server{
 		Addr:    cfg.API.Listen,
-		Handler: auditMiddleware(logger)(mux),
+		Handler: auditMiddleware(logger, telemetryDB)(mux),
 	}
 
 	return s

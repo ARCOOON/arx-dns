@@ -18,6 +18,13 @@ type aclRulesResponse struct {
 type createACLRuleRequest struct {
 	Subnet      string `json:"subnet"`
 	Description string `json:"description,omitempty"`
+	Action      string `json:"action,omitempty"`
+}
+
+type updateACLRuleRequest struct {
+	Subnet      string `json:"subnet"`
+	Description string `json:"description,omitempty"`
+	Action      string `json:"action,omitempty"`
 }
 
 type aclMutationResponse struct {
@@ -71,11 +78,13 @@ func (s *Server) handleCreateACLRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rule, err := acl.InsertRule(s.telemetryDB.Main(), in.Subnet, in.Description)
+	rule, err := acl.InsertRule(s.telemetryDB.Main(), in.Subnet, in.Description, in.Action)
 	if err != nil {
 		switch {
 		case errors.Is(err, acl.ErrInvalidSubnet):
 			writeJSONError(w, http.StatusBadRequest, "invalid subnet; use an IP address or CIDR notation")
+		case errors.Is(err, acl.ErrInvalidAction):
+			writeJSONError(w, http.StatusBadRequest, "invalid action; use allow or block")
 		case errors.Is(err, acl.ErrRuleAlreadyExists):
 			writeJSONError(w, http.StatusConflict, "acl rule already exists")
 		default:
@@ -120,5 +129,55 @@ func (s *Server) handleDeleteACLRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, aclMutationResponse{
 		Status:  "ok",
 		Message: "acl rule deleted",
+	})
+}
+
+func (s *Server) handleUpdateACLRule(w http.ResponseWriter, r *http.Request) {
+	if s.telemetryDB == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+
+	id, err := strconv.ParseInt(strings.TrimSpace(r.PathValue("id")), 10, 64)
+	if err != nil || id <= 0 {
+		writeJSONError(w, http.StatusBadRequest, "invalid acl rule id")
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "failed to read request body")
+		return
+	}
+
+	var in updateACLRuleRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "malformed JSON payload")
+		return
+	}
+
+	rule, err := acl.UpdateRule(s.telemetryDB.Main(), id, in.Subnet, in.Description, in.Action)
+	if err != nil {
+		switch {
+		case errors.Is(err, acl.ErrInvalidSubnet):
+			writeJSONError(w, http.StatusBadRequest, "invalid subnet; use an IP address or CIDR notation")
+		case errors.Is(err, acl.ErrInvalidAction):
+			writeJSONError(w, http.StatusBadRequest, "invalid action; use allow or block")
+		case errors.Is(err, acl.ErrRuleAlreadyExists):
+			writeJSONError(w, http.StatusConflict, "acl rule already exists")
+		case errors.Is(err, acl.ErrRuleNotFound):
+			writeJSONError(w, http.StatusNotFound, "acl rule not found")
+		default:
+			writeJSONError(w, http.StatusInternalServerError, "failed to update acl rule")
+		}
+		return
+	}
+
+	s.reloadQueryACL()
+
+	writeJSON(w, http.StatusOK, aclMutationResponse{
+		Status:  "ok",
+		Message: "acl rule updated",
+		Rule:    &rule,
 	})
 }
