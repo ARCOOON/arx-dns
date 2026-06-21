@@ -100,6 +100,9 @@ func (m *Memory) DeleteZoneRecordByID(zonesDir, origin string, view ZoneView, id
 	if match == nil {
 		return ErrRecordNotFound
 	}
+	if strings.EqualFold(match.Type, "SOA") {
+		return ErrSOANotDeletable
+	}
 
 	qtype, err := parseRecordType(match.Type)
 	if err != nil {

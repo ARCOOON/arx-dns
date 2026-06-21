@@ -18,6 +18,8 @@ var (
 	ErrZoneNotFound = errors.New("zone not found")
 	// ErrRecordNotFound indicates no matching record exists in the zone.
 	ErrRecordNotFound = errors.New("record not found")
+	// ErrSOANotDeletable indicates an attempt to remove the zone SOA record.
+	ErrSOANotDeletable = errors.New("SOA record cannot be deleted, only modified")
 )
 
 // ListZones returns metadata for all registered zones across public and internal views.
@@ -115,6 +117,9 @@ func (m *Memory) DeleteZoneRecord(zonesDir, origin string, view ZoneView, in Rec
 	if err != nil {
 		return err
 	}
+	if qtype == mdns.TypeSOA {
+		return ErrSOANotDeletable
+	}
 
 	value := strings.TrimSpace(in.Value)
 	if value == "" {
@@ -178,9 +183,6 @@ func (m *Memory) zoneFilePath(zonesDir, origin string, view ZoneView) (string, e
 func WriteZoneFile(path, origin string, tree *radix.Tree, ttlHints map[string]string) error {
 	origin = NormalizeName(origin)
 	rrs := collectZoneRecords(tree, origin)
-	if len(rrs) == 0 {
-		return fmt.Errorf("zone %s has no records to write", origin)
-	}
 
 	sort.Slice(rrs, func(i, j int) bool {
 		left := rrs[i].Header()
