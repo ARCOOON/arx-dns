@@ -42,6 +42,12 @@ enabled = true
 requests_per_second = 100
 burst = 200
 
+[logging]
+file_path = './logs/arx-dns.log'
+max_size_mb = 50
+max_backups = 3
+max_age_days = 28
+
 [ecs]
 enabled = false
 ipv4_prefix_length = 24

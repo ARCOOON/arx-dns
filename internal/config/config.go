@@ -18,106 +18,115 @@ import (
 
 // Config holds all arx-dns runtime settings loaded from a TOML file.
 type Config struct {
-	Server    ServerConfig    `toml:"server"`
-	TLS       TLSConfig       `toml:"tls"`
-	Listeners ListenersConfig `toml:"listeners"`
-	API       APIConfig       `toml:"api"`
-	Zones     ZonesConfig     `toml:"zones"`
-	Recursive RecursiveConfig `toml:"recursive"`
-	Resolver  ResolverConfig  `toml:"resolver"`
-	Firewall  FirewallConfig  `toml:"firewall"`
-	Security  SecurityConfig  `toml:"security"`
-	RateLimit RateLimitConfig `toml:"rate_limit"`
-	ECS       ECSConfig       `toml:"ecs"`
-	Update    UpdateConfig    `toml:"update"`
-	XFR       XFRConfig       `toml:"xfr"`
+	Server    ServerConfig    `toml:"server" json:"server"`
+	TLS       TLSConfig       `toml:"tls" json:"tls"`
+	Listeners ListenersConfig `toml:"listeners" json:"listeners"`
+	API       APIConfig       `toml:"api" json:"api"`
+	Zones     ZonesConfig     `toml:"zones" json:"zones"`
+	Recursive RecursiveConfig `toml:"recursive" json:"recursive"`
+	Resolver  ResolverConfig  `toml:"resolver" json:"resolver"`
+	Firewall  FirewallConfig  `toml:"firewall" json:"firewall"`
+	Security  SecurityConfig  `toml:"security" json:"security"`
+	RateLimit RateLimitConfig `toml:"rate_limit" json:"rate_limit"`
+	ECS       ECSConfig       `toml:"ecs" json:"ecs"`
+	Logging   LoggingConfig   `toml:"logging" json:"logging"`
+	Update    UpdateConfig    `toml:"update" json:"update"`
+	XFR       XFRConfig       `toml:"xfr" json:"xfr"`
+}
+
+// LoggingConfig controls structured log file rotation parameters.
+type LoggingConfig struct {
+	FilePath   string `toml:"file_path" json:"file_path"`
+	MaxSizeMB  int    `toml:"max_size_mb" json:"max_size_mb"`
+	MaxBackups int    `toml:"max_backups" json:"max_backups"`
+	MaxAgeDays int    `toml:"max_age_days" json:"max_age_days"`
 }
 
 // XFRConfig controls zone transfer (AXFR/IXFR) ACLs and NOTIFY slave targets.
 type XFRConfig struct {
-	Enabled        bool     `toml:"enabled"`
-	AllowedSubnets []string `toml:"allowed_subnets"`
-	NotifySlaves   []string `toml:"notify_slaves"`
+	Enabled        bool     `toml:"enabled" json:"enabled"`
+	AllowedSubnets []string `toml:"allowed_subnets" json:"allowed_subnets"`
+	NotifySlaves   []string `toml:"notify_slaves" json:"notify_slaves"`
 }
 
 // UpdateConfig controls RFC 2136 dynamic DNS updates secured with TSIG.
 type UpdateConfig struct {
 	// Keys maps TSIG key names (canonical FQDN, e.g. "update-key.") to base64-encoded secrets.
-	Keys map[string]string `toml:"keys"`
+	Keys map[string]string `toml:"keys" json:"keys"`
 }
 
 // ECSConfig controls EDNS Client Subnet (RFC 7871) forwarding to upstream resolvers.
 type ECSConfig struct {
-	Enabled          bool `toml:"enabled"`
-	IPv4PrefixLength int  `toml:"ipv4_prefix_length"`
-	IPv6PrefixLength int  `toml:"ipv6_prefix_length"`
+	Enabled          bool `toml:"enabled" json:"enabled"`
+	IPv4PrefixLength int  `toml:"ipv4_prefix_length" json:"ipv4_prefix_length"`
+	IPv6PrefixLength int  `toml:"ipv6_prefix_length" json:"ipv6_prefix_length"`
 }
 
 // RateLimitConfig controls per-client-IP response rate limiting (RRL).
 type RateLimitConfig struct {
-	Enabled           bool `toml:"enabled"`
-	RequestsPerSecond int  `toml:"requests_per_second"`
-	Burst             int  `toml:"burst"`
+	Enabled           bool `toml:"enabled" json:"enabled"`
+	RequestsPerSecond int  `toml:"requests_per_second" json:"requests_per_second"`
+	Burst             int  `toml:"burst" json:"burst"`
 }
 
 // SecurityConfig controls DNSSEC, DNS Cookies, and related validation policies.
 type SecurityConfig struct {
-	DNSSECValidation  bool   `toml:"dnssec_validation"`
-	DNSCookiesEnabled bool   `toml:"dns_cookies_enabled"`
-	DNSCookieSecret   string `toml:"dns_cookie_secret"`
+	DNSSECValidation  bool   `toml:"dnssec_validation" json:"dnssec_validation"`
+	DNSCookiesEnabled bool   `toml:"dns_cookies_enabled" json:"dns_cookies_enabled"`
+	DNSCookieSecret   string `toml:"dns_cookie_secret" json:"dns_cookie_secret,omitempty"`
 }
 
 // ServerConfig controls the DNS listener bind address and reactor sizing.
 type ServerConfig struct {
-	Listen     string `toml:"listen"`
-	Port       int    `toml:"port"`
-	EventLoops int    `toml:"event_loops"`
-	LogLevel   string `toml:"log_level"`
+	Listen     string `toml:"listen" json:"listen"`
+	Port       int    `toml:"port" json:"port"`
+	EventLoops int    `toml:"event_loops" json:"event_loops"`
+	LogLevel   string `toml:"log_level" json:"log_level"`
 }
 
 // TLSConfig holds the server certificate and private key for encrypted DNS transports.
 type TLSConfig struct {
-	CertFile string `toml:"cert_file"`
-	KeyFile  string `toml:"key_file"`
+	CertFile string `toml:"cert_file" json:"cert_file"`
+	KeyFile  string `toml:"key_file" json:"key_file"`
 }
 
 // ListenersConfig controls bind addresses for DNS-over-TLS and DNS-over-HTTPS.
 type ListenersConfig struct {
-	DoT string `toml:"dot"`
-	DoH string `toml:"doh"`
+	DoT string `toml:"dot" json:"dot"`
+	DoH string `toml:"doh" json:"doh"`
 }
 
 // APIConfig controls the management and telemetry HTTP API listener.
 type APIConfig struct {
-	Listen    string `toml:"listen"`
-	AuthToken string `toml:"auth_token"`
-	TLSCert   string `toml:"tls_cert"`
-	TLSKey    string `toml:"tls_key"`
+	Listen    string `toml:"listen" json:"listen"`
+	AuthToken string `toml:"auth_token" json:"auth_token"`
+	TLSCert   string `toml:"tls_cert" json:"tls_cert"`
+	TLSKey    string `toml:"tls_key" json:"tls_key"`
 }
 
 // ZonesConfig controls authoritative zone file storage.
 type ZonesConfig struct {
-	Directory string `toml:"directory"`
+	Directory string `toml:"directory" json:"directory"`
 }
 
 // RecursiveConfig controls upstream forwarding and client ACL prefixes.
 type RecursiveConfig struct {
-	Upstreams      []string `toml:"upstreams"`
-	TrustedSubnets []string `toml:"trusted_subnets"`
+	Upstreams      []string `toml:"upstreams" json:"upstreams"`
+	TrustedSubnets []string `toml:"trusted_subnets" json:"trusted_subnets"`
 }
 
 // ResolverConfig selects recursive resolution strategy (forward vs iterative).
 type ResolverConfig struct {
-	Mode                string `toml:"mode"`
-	QNameMinimization   bool   `toml:"qname_minimization"`
-	RootHintsFile       string `toml:"root_hints_file"`
-	AutoUpdateRootHints bool   `toml:"auto_update_root_hints"`
+	Mode                string `toml:"mode" json:"mode"`
+	QNameMinimization   bool   `toml:"qname_minimization" json:"qname_minimization"`
+	RootHintsFile       string `toml:"root_hints_file" json:"root_hints_file"`
+	AutoUpdateRootHints bool   `toml:"auto_update_root_hints" json:"auto_update_root_hints"`
 }
 
 // FirewallConfig controls DNS blocklist loading and block actions.
 type FirewallConfig struct {
-	BlocklistsDirectory string `toml:"blocklists_directory"`
-	BlockAction         string `toml:"block_action"`
+	BlocklistsDirectory string `toml:"blocklists_directory" json:"blocklists_directory"`
+	BlockAction         string `toml:"block_action" json:"block_action"`
 }
 
 const (
@@ -139,6 +148,10 @@ const (
 	defaultResolverMode      = "forward"
 	defaultLogLevel          = "INFO"
 	defaultRootHintsFile     = "./data/named.root"
+	defaultLogFilePath       = "./logs/arx-dns.log"
+	defaultLogMaxSizeMB      = 50
+	defaultLogMaxBackups     = 3
+	defaultLogMaxAgeDays     = 28
 )
 
 // DefaultRootHints returns the 13 standard IPv4 root server addresses (RFC root hint set).
@@ -214,6 +227,12 @@ func Default() Config {
 			Enabled:          false,
 			IPv4PrefixLength: defaultECSIPv4PrefixLen,
 			IPv6PrefixLength: defaultECSIPv6PrefixLen,
+		},
+		Logging: LoggingConfig{
+			FilePath:   defaultLogFilePath,
+			MaxSizeMB:  defaultLogMaxSizeMB,
+			MaxBackups: defaultLogMaxBackups,
+			MaxAgeDays: defaultLogMaxAgeDays,
 		},
 	}
 }
@@ -331,6 +350,11 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.Resolver.Mode) == "" {
 		c.Resolver.Mode = def.Resolver.Mode
 	}
+	if strings.TrimSpace(c.Logging.FilePath) == "" {
+		c.Logging = def.Logging
+	} else if c.Logging.MaxSizeMB == 0 {
+		c.Logging.MaxSizeMB = def.Logging.MaxSizeMB
+	}
 }
 
 // Validate checks that all configuration fields are usable at runtime.
@@ -383,7 +407,149 @@ func (c Config) Validate() error {
 	if err := c.validateXFR(); err != nil {
 		return err
 	}
+	if err := c.validateLogging(); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (c Config) validateLogging() error {
+	if strings.TrimSpace(c.Logging.FilePath) == "" {
+		return errors.New("logging.file_path must not be empty")
+	}
+	if c.Logging.MaxSizeMB <= 0 {
+		return errors.New("logging.max_size_mb must be greater than zero")
+	}
+	if c.Logging.MaxBackups < 0 {
+		return errors.New("logging.max_backups must be zero or greater")
+	}
+	if c.Logging.MaxAgeDays < 0 {
+		return errors.New("logging.max_age_days must be zero or greater")
+	}
+	return nil
+}
+
+// RequiresRestart reports whether applying next would need a process restart
+// because listener bind addresses or encrypted transport certificates changed.
+func RequiresRestart(current, next Config) bool {
+	if current.Server.Listen != next.Server.Listen ||
+		current.Server.Port != next.Server.Port ||
+		current.Server.EventLoops != next.Server.EventLoops {
+		return true
+	}
+	if current.Listeners.DoT != next.Listeners.DoT ||
+		current.Listeners.DoH != next.Listeners.DoH {
+		return true
+	}
+	if current.API.Listen != next.API.Listen ||
+		current.API.TLSCert != next.API.TLSCert ||
+		current.API.TLSKey != next.API.TLSKey {
+		return true
+	}
+	if current.TLS.CertFile != next.TLS.CertFile ||
+		current.TLS.KeyFile != next.TLS.KeyFile {
+		return true
+	}
+	if current.ResolverMode() != next.ResolverMode() {
+		return true
+	}
+	return false
+}
+
+// MergeWithCurrent overlays an API update onto the active configuration while
+// preserving infrastructure and secret fields when the payload omits them.
+func MergeWithCurrent(current, incoming Config) Config {
+	out := incoming
+
+	if strings.TrimSpace(out.Server.Listen) == "" {
+		out.Server.Listen = current.Server.Listen
+	}
+	if out.Server.Port == 0 {
+		out.Server.Port = current.Server.Port
+	}
+
+	if strings.TrimSpace(out.TLS.CertFile) == "" && strings.TrimSpace(out.TLS.KeyFile) == "" {
+		out.TLS = current.TLS
+	}
+
+	if strings.TrimSpace(out.Listeners.DoT) == "" {
+		out.Listeners.DoT = current.Listeners.DoT
+	}
+	if strings.TrimSpace(out.Listeners.DoH) == "" {
+		out.Listeners.DoH = current.Listeners.DoH
+	}
+
+	if strings.TrimSpace(out.API.Listen) == "" {
+		out.API.Listen = current.API.Listen
+	}
+	if strings.TrimSpace(out.API.AuthToken) == "" {
+		out.API.AuthToken = current.API.AuthToken
+	}
+	if strings.TrimSpace(out.API.TLSCert) == "" && strings.TrimSpace(out.API.TLSKey) == "" {
+		out.API.TLSCert = current.API.TLSCert
+		out.API.TLSKey = current.API.TLSKey
+	}
+
+	if strings.TrimSpace(out.Zones.Directory) == "" {
+		out.Zones.Directory = current.Zones.Directory
+	}
+
+	if strings.TrimSpace(out.Firewall.BlocklistsDirectory) == "" {
+		out.Firewall.BlocklistsDirectory = current.Firewall.BlocklistsDirectory
+	}
+	if strings.TrimSpace(out.Firewall.BlockAction) == "" {
+		out.Firewall.BlockAction = current.Firewall.BlockAction
+	}
+
+	if len(out.Recursive.Upstreams) == 0 {
+		out.Recursive.Upstreams = append([]string(nil), current.Recursive.Upstreams...)
+	}
+	if len(out.Recursive.TrustedSubnets) == 0 {
+		out.Recursive.TrustedSubnets = append([]string(nil), current.Recursive.TrustedSubnets...)
+	}
+
+	if strings.TrimSpace(out.Resolver.RootHintsFile) == "" {
+		out.Resolver.RootHintsFile = current.Resolver.RootHintsFile
+	}
+
+	if strings.TrimSpace(out.Security.DNSCookieSecret) == "" {
+		out.Security.DNSCookieSecret = current.Security.DNSCookieSecret
+	}
+
+	if out.Update.Keys == nil {
+		out.Update.Keys = current.Update.Keys
+	}
+
+	if !out.XFR.Enabled && len(out.XFR.AllowedSubnets) == 0 && len(out.XFR.NotifySlaves) == 0 {
+		out.XFR = current.XFR
+	}
+
+	return out
+}
+
+// PrepareForApply normalizes and validates an incoming configuration payload.
+func PrepareForApply(in Config) (Config, error) {
+	in.applyDefaults()
+	in.normalizeUpdateKeys()
+	if err := in.Validate(); err != nil {
+		return Config{}, err
+	}
+	if err := in.normalizeUpstreamsForStorage(); err != nil {
+		return Config{}, err
+	}
+	return in, nil
+}
+
+func (c *Config) normalizeUpstreamsForStorage() error {
+	if c.ResolverMode() != "forward" {
+		return nil
+	}
+	normalized, err := c.NormalizedUpstreams()
+	if err != nil {
+		return err
+	}
+	c.Recursive.Upstreams = normalized
 	return nil
 }
 
