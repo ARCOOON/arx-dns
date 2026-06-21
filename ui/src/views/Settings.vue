@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Activity,
   FileText,
   Loader2,
   Monitor,
@@ -13,8 +12,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
-import { fetchAuditLogs, type AuditLogEntry } from '@/api/audit'
+import { notify } from '@/composables/useNotifications'
 import {
   cloneAppConfig,
   fetchConfig,
@@ -64,7 +62,7 @@ import {
 } from '@/composables/useToastPosition'
 import { parseApiError } from '@/utils/apiError'
 
-const TAB_IDS = ['dns', 'security', 'logging', 'audit', 'ui'] as const
+const TAB_IDS = ['dns', 'security', 'logging', 'ui'] as const
 type TabId = (typeof TAB_IDS)[number]
 
 const route = useRoute()
@@ -99,15 +97,16 @@ const trustedDialogOpen = ref(false)
 const trustedSubnetInput = ref('')
 const deletingTrustedIndex = ref<number | null>(null)
 
-const auditLogs = ref<AuditLogEntry[]>([])
-const auditLoading = ref(true)
-
 function isValidTab(value: string): value is TabId {
   return TAB_IDS.includes(value as TabId)
 }
 
 function syncTabFromRoute(): void {
   const tab = route.query.tab
+  if (typeof tab === 'string' && tab === 'audit') {
+    void router.replace({ path: '/audit' })
+    return
+  }
   if (typeof tab === 'string' && isValidTab(tab)) {
     activeTab.value = tab
   }
@@ -139,7 +138,7 @@ async function loadConfig(): Promise<void> {
     config.value = loaded
     applyConfigToForm(loaded)
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load configuration'))
+    notify(parseApiError(err, 'Failed to load configuration'), 'error')
   } finally {
     configLoading.value = false
   }
@@ -155,10 +154,10 @@ async function saveConfig(section: string): Promise<void> {
     if (response.requires_restart) {
       requiresRestart.value = true
     }
-    toast.success(`${section} settings saved`)
+    notify(`${section} settings saved`)
     await loadConfig()
   } catch (err) {
-    toast.error(parseApiError(err, `Failed to save ${section.toLowerCase()} settings`))
+    notify(parseApiError(err, `Failed to save ${section.toLowerCase()} settings`), 'error')
   } finally {
     configSaving.value = false
   }
@@ -170,7 +169,7 @@ async function loadRules(): Promise<void> {
     const response = await fetchACLRules()
     rules.value = response.rules
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load ACL rules'))
+    notify(parseApiError(err, 'Failed to load ACL rules'), 'error')
   } finally {
     aclLoading.value = false
   }
@@ -195,7 +194,7 @@ function openEditRuleDialog(rule: ACLRule): void {
 async function submitRuleDialog(): Promise<void> {
   const subnet = ruleSubnet.value.trim()
   if (!subnet) {
-    toast.error('Subnet or IP address is required')
+    notify('Subnet or IP address is required', 'error')
     return
   }
 
@@ -203,7 +202,7 @@ async function submitRuleDialog(): Promise<void> {
   try {
     if (editingRuleId.value === null) {
       await createACLRule(subnet, ruleDescription.value, ruleAction.value)
-      toast.success('ACL rule added')
+      notify('ACL rule added')
     } else {
       await updateACLRule(
         editingRuleId.value,
@@ -211,12 +210,12 @@ async function submitRuleDialog(): Promise<void> {
         ruleDescription.value,
         ruleAction.value,
       )
-      toast.success('ACL rule updated')
+      notify('ACL rule updated')
     }
     ruleDialogOpen.value = false
     await loadRules()
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to save ACL rule'))
+    notify(parseApiError(err, 'Failed to save ACL rule'), 'error')
   } finally {
     savingRule.value = false
   }
@@ -227,9 +226,9 @@ async function removeRule(id: number): Promise<void> {
   try {
     await deleteACLRule(id)
     await loadRules()
-    toast.success('ACL rule removed')
+    notify('ACL rule removed')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to delete ACL rule'))
+    notify(parseApiError(err, 'Failed to delete ACL rule'), 'error')
   } finally {
     deletingId.value = null
   }
@@ -243,11 +242,11 @@ function openTrustedDialog(): void {
 function addTrustedSubnet(): void {
   const subnet = trustedSubnetInput.value.trim()
   if (!subnet) {
-    toast.error('Subnet or IP address is required')
+    notify('Subnet or IP address is required', 'error')
     return
   }
   if (trustedSubnets.value.includes(subnet)) {
-    toast.error('Subnet is already listed')
+    notify('Subnet is already listed', 'error')
     return
   }
   trustedSubnets.value = [...trustedSubnets.value, subnet]
@@ -268,11 +267,11 @@ function openUpstreamDialog(): void {
 function addUpstream(): void {
   const upstream = upstreamInput.value.trim()
   if (!upstream) {
-    toast.error('Upstream IP or hostname is required')
+    notify('Upstream IP or hostname is required', 'error')
     return
   }
   if (upstreams.value.includes(upstream)) {
-    toast.error('Upstream is already listed')
+    notify('Upstream is already listed', 'error')
     return
   }
   upstreams.value = [...upstreams.value, upstream]
@@ -291,35 +290,6 @@ function actionBadgeClass(action: ACLAction): string {
     : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
 }
 
-async function loadAuditLogs(): Promise<void> {
-  auditLoading.value = true
-  try {
-    const response = await fetchAuditLogs()
-    auditLogs.value = response.logs
-  } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load audit trail'))
-  } finally {
-    auditLoading.value = false
-  }
-}
-
-function formatTimestamp(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(date)
-}
-
-const sortedAuditLogs = computed(() =>
-  [...auditLogs.value].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  ),
-)
-
 watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } })
 })
@@ -335,7 +305,6 @@ onMounted(() => {
   syncTabFromRoute()
   void loadConfig()
   void loadRules()
-  void loadAuditLogs()
 })
 </script>
 
@@ -344,7 +313,7 @@ onMounted(() => {
     <div class="space-y-1">
       <h1 class="font-heading text-2xl font-semibold tracking-tight">Settings</h1>
       <p class="text-sm text-muted-foreground">
-        Manage DNS configuration, security policies, logging, and audit history.
+        Manage DNS configuration, security policies, and logging.
       </p>
     </div>
 
@@ -353,7 +322,7 @@ onMounted(() => {
     </Alert>
 
     <Tabs v-model="activeTab" class="space-y-4">
-      <TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
+      <TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-2 lg:grid-cols-4">
         <TabsTrigger value="dns" class="gap-1.5">
           <Server class="size-4" />
           DNS &amp; System
@@ -365,10 +334,6 @@ onMounted(() => {
         <TabsTrigger value="logging" class="gap-1.5">
           <FileText class="size-4" />
           Logging
-        </TabsTrigger>
-        <TabsTrigger value="audit" class="gap-1.5">
-          <Activity class="size-4" />
-          Audit Trail
         </TabsTrigger>
         <TabsTrigger value="ui" class="gap-1.5">
           <Monitor class="size-4" />
@@ -782,72 +747,6 @@ onMounted(() => {
                 </Button>
               </div>
             </template>
-          </CardContent>
-        </Card>
-      </TabsContent>
-
-      <TabsContent value="audit">
-        <Card>
-          <CardHeader class="flex flex-row items-center justify-between gap-4 space-y-0">
-            <div class="space-y-1">
-              <CardTitle>Audit Trail</CardTitle>
-              <CardDescription>
-                Recent management API mutations, newest first (up to 500 entries).
-              </CardDescription>
-            </div>
-            <Button variant="outline" size="sm" @click="loadAuditLogs">
-              <Loader2 v-if="auditLoading" class="mr-1.5 size-4 animate-spin" />
-              Refresh
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div
-              v-if="auditLoading"
-              class="flex items-center gap-2 py-10 text-sm text-muted-foreground"
-            >
-              <Loader2 class="size-4 animate-spin" />
-              Loading audit logs…
-            </div>
-
-            <div
-              v-else-if="sortedAuditLogs.length === 0"
-              class="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground"
-            >
-              No audit events recorded yet.
-            </div>
-
-            <div v-else class="overflow-x-auto rounded-md border">
-              <table class="w-full text-sm">
-                <thead>
-                  <tr class="border-b bg-muted/40 text-left">
-                    <th class="px-4 py-3 font-medium">Timestamp</th>
-                    <th class="px-4 py-3 font-medium">Client IP</th>
-                    <th class="px-4 py-3 font-medium">Action</th>
-                    <th class="px-4 py-3 font-medium">Target</th>
-                    <th class="px-4 py-3 font-medium">Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="entry in sortedAuditLogs"
-                    :key="entry.id"
-                    class="border-b last:border-b-0"
-                  >
-                    <td class="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">
-                      {{ formatTimestamp(entry.timestamp) }}
-                    </td>
-                    <td class="px-4 py-3 font-mono text-xs">{{ entry.client_ip }}</td>
-                    <td class="px-4 py-3">{{ entry.action }}</td>
-                    <td class="px-4 py-3 font-mono text-xs">
-                      {{ entry.target || '—' }}
-                    </td>
-                    <td class="max-w-xs truncate px-4 py-3 text-xs text-muted-foreground">
-                      {{ entry.details || '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
           </CardContent>
         </Card>
       </TabsContent>

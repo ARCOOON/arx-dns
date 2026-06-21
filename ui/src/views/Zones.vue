@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { notify } from '@/composables/useNotifications'
 import {
   createZone,
   createZoneRecord,
@@ -188,7 +188,7 @@ async function loadZones(): Promise<void> {
       selectedZone.value = match ?? zones.value[0] ?? null
     }
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load zones'))
+    notify(parseApiError(err, 'Failed to load zones'), 'error')
   } finally {
     loadingZones.value = false
   }
@@ -209,7 +209,7 @@ async function loadRecords(): Promise<void> {
     records.value = response.records
   } catch (err) {
     records.value = []
-    toast.error(parseApiError(err, 'Failed to load records'))
+    notify(parseApiError(err, 'Failed to load records'), 'error')
   } finally {
     loadingRecords.value = false
   }
@@ -273,9 +273,9 @@ async function submitZone(): Promise<void> {
       selectedZone.value = created
     }
     await loadRecords()
-    toast.success('Zone created')
+    notify('Zone created')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to create zone'))
+    notify(parseApiError(err, 'Failed to create zone'), 'error')
   } finally {
     creatingZone.value = false
   }
@@ -294,9 +294,9 @@ async function confirmDeleteZone(): Promise<void> {
     records.value = []
     await loadZones()
     await loadRecords()
-    toast.success('Zone deleted')
+    notify('Zone deleted')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to delete zone'))
+    notify(parseApiError(err, 'Failed to delete zone'), 'error')
   } finally {
     deletingZone.value = false
   }
@@ -329,20 +329,21 @@ async function submitRecord(): Promise<void> {
         editingRecordId.value,
         payload,
       )
-      toast.success('Record updated')
+      notify('Record updated')
     } else {
       await createZoneRecord(selectedZone.value.origin, payload)
-      toast.success('Record created')
+      notify('Record created')
     }
     recordDialogOpen.value = false
     resetForm()
     await Promise.all([loadZones(), loadRecords()])
   } catch (err) {
-    toast.error(
+    notify(
       parseApiError(
         err,
         isEditingRecord.value ? 'Failed to update record' : 'Failed to create record',
       ),
+      'error',
     )
   } finally {
     submitting.value = false
@@ -365,9 +366,9 @@ async function confirmDeleteRecord(): Promise<void> {
     deleteRecordDialogOpen.value = false
     recordPendingDelete.value = null
     await Promise.all([loadZones(), loadRecords()])
-    toast.success('Record deleted')
+    notify('Record deleted')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to delete record'))
+    notify(parseApiError(err, 'Failed to delete record'), 'error')
   } finally {
     deletingId.value = null
   }

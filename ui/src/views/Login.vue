@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { toast } from 'vue-sonner'
+import { notify } from '@/composables/useNotifications'
 import { setToken } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -18,7 +18,7 @@ const token = ref(localStorage.getItem('arx_token') ?? '')
 function onSubmit(): void {
   const trimmed = token.value.trim()
   if (!trimmed) {
-    toast.error('Enter a valid API bearer token.')
+    notify('Enter a valid API bearer token.', 'error')
     return
   }
 

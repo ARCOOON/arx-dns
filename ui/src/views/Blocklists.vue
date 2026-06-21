@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { Loader2, Plus, RefreshCw, ShieldBan, Trash2 } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
 import {
   createBlocklistSource,
   createCustomBlocklistDomain,
@@ -35,9 +34,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { notify } from '@/composables/useNotifications'
 import { parseApiError } from '@/utils/apiError'
 
-const STATUS_POLL_MS = 2000
+const STATUS_POLL_MS = 2500
 const SYNC_POLL_MAX_MS = 120000
 
 const sources = ref<BlocklistSource[]>([])
@@ -47,7 +47,6 @@ const loadingSources = ref(true)
 const loadingCustom = ref(true)
 const loadingStatus = ref(true)
 const isSyncing = ref(false)
-const isSyncPolling = ref(false)
 const addSourceDialogOpen = ref(false)
 const addCustomDialogOpen = ref(false)
 const newSourceURL = ref('')
@@ -62,6 +61,8 @@ const togglingSourceId = ref<number | null>(null)
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 let syncPollTimer: ReturnType<typeof setInterval> | null = null
 let syncStopTimer: ReturnType<typeof setTimeout> | null = null
+let syncPollCount = 0
+let syncWasActive = false
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
@@ -90,7 +91,55 @@ function clearSyncPolling(): void {
     clearTimeout(syncStopTimer)
     syncStopTimer = null
   }
-  isSyncPolling.value = false
+}
+
+function finishSync(timedOut = false): void {
+  clearSyncPolling()
+  isSyncing.value = false
+  resumeStatusPolling()
+  void Promise.all([loadStatus(), loadSources(true)])
+  if (timedOut) {
+    notify('Blocklist sync timed out — refresh to check feed status', 'error')
+  } else {
+    notify('Blocklist sync completed')
+  }
+}
+
+async function pollSyncStatus(): Promise<void> {
+  syncPollCount++
+  try {
+    const response = await fetchFirewallStatus()
+    blockedCount.value = response.blocked_domains_count
+    loadingStatus.value = false
+    if (response.sync_in_progress) {
+      syncWasActive = true
+      return
+    }
+    if (syncWasActive || syncPollCount > 1) {
+      finishSync()
+    }
+  } catch (err) {
+    notify(parseApiError(err, 'Failed to check sync status'), 'error')
+  }
+}
+
+function startSyncPolling(): void {
+  clearSyncPolling()
+  isSyncing.value = true
+  syncPollCount = 0
+  syncWasActive = false
+  pauseStatusPolling()
+
+  void pollSyncStatus()
+  syncPollTimer = setInterval(() => {
+    void pollSyncStatus()
+  }, STATUS_POLL_MS)
+
+  syncStopTimer = setTimeout(() => {
+    if (isSyncing.value) {
+      finishSync(true)
+    }
+  }, SYNC_POLL_MAX_MS)
 }
 
 function pauseStatusPolling(): void {
@@ -101,7 +150,7 @@ function pauseStatusPolling(): void {
 }
 
 function resumeStatusPolling(): void {
-  if (isSyncing.value || isSyncPolling.value || statusPollTimer !== null) {
+  if (isSyncing.value || statusPollTimer !== null) {
     return
   }
   statusPollTimer = setInterval(() => {
@@ -115,7 +164,7 @@ async function loadStatus(): Promise<void> {
     const response = await fetchFirewallStatus()
     blockedCount.value = response.blocked_domains_count
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load firewall status'))
+    notify(parseApiError(err, 'Failed to load firewall status'), 'error')
   } finally {
     loadingStatus.value = false
   }
@@ -129,7 +178,7 @@ async function loadSources(silent = false): Promise<void> {
     const response = await fetchBlocklistSources()
     sources.value = response.sources
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load blocklist sources'))
+    notify(parseApiError(err, 'Failed to load blocklist sources'), 'error')
   } finally {
     if (!silent) {
       loadingSources.value = false
@@ -143,7 +192,7 @@ async function loadCustomDomains(): Promise<void> {
     const response = await fetchCustomBlocklist()
     customDomains.value = response.domains
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load custom blocklist domains'))
+    notify(parseApiError(err, 'Failed to load custom blocklist domains'), 'error')
   } finally {
     loadingCustom.value = false
   }
@@ -173,9 +222,9 @@ async function submitSource(): Promise<void> {
     newSourceURL.value = ''
     newSourceDescription.value = ''
     await loadSources()
-    toast.success('Blocklist source added')
+    notify('Blocklist source added')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to add blocklist source'))
+    notify(parseApiError(err, 'Failed to add blocklist source'), 'error')
   } finally {
     creatingSource.value = false
   }
@@ -193,9 +242,9 @@ async function submitCustomDomain(): Promise<void> {
     addCustomDialogOpen.value = false
     newCustomDomain.value = ''
     await Promise.all([loadCustomDomains(), loadStatus()])
-    toast.success('Custom domain blocked')
+    notify('Custom domain blocked')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to add custom blocklist domain'))
+    notify(parseApiError(err, 'Failed to add custom blocklist domain'), 'error')
   } finally {
     creatingCustom.value = false
   }
@@ -206,9 +255,9 @@ async function removeSource(source: BlocklistSource): Promise<void> {
   try {
     await deleteBlocklistSource(source.id)
     await loadSources()
-    toast.success('Blocklist source removed')
+    notify('Blocklist source removed')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to delete blocklist source'))
+    notify(parseApiError(err, 'Failed to delete blocklist source'), 'error')
   } finally {
     deletingSourceId.value = null
   }
@@ -229,7 +278,7 @@ async function toggleSourceEnabled(source: BlocklistSource, enabled: boolean): P
     await loadStatus()
   } catch (err) {
     source.enabled = previous
-    toast.error(parseApiError(err, 'Failed to update blocklist source'))
+    notify(parseApiError(err, 'Failed to update blocklist source'), 'error')
   } finally {
     togglingSourceId.value = null
   }
@@ -240,9 +289,9 @@ async function removeCustomDomain(entry: CustomBlocklistEntry): Promise<void> {
   try {
     await deleteCustomBlocklistDomain(entry.id)
     await Promise.all([loadCustomDomains(), loadStatus()])
-    toast.success('Custom domain removed')
+    notify('Custom domain removed')
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to delete custom blocklist domain'))
+    notify(parseApiError(err, 'Failed to delete custom blocklist domain'), 'error')
   } finally {
     deletingCustomId.value = null
   }
@@ -253,28 +302,18 @@ async function triggerSync(): Promise<void> {
     return
   }
 
-  isSyncing.value = true
-  pauseStatusPolling()
-  clearSyncPolling()
-
   try {
     await syncBlocklists()
-    toast.success('Blocklist sync started')
-    isSyncPolling.value = true
-    syncPollTimer = setInterval(() => {
-      void Promise.all([loadStatus(), loadSources(true)])
-    }, STATUS_POLL_MS)
-    syncStopTimer = setTimeout(() => {
-      clearSyncPolling()
-      resumeStatusPolling()
-      void Promise.all([loadStatus(), loadSources(true)])
-    }, SYNC_POLL_MAX_MS)
+    notify('Blocklist sync started')
+    startSyncPolling()
   } catch (err) {
-    clearSyncPolling()
-    resumeStatusPolling()
-    toast.error(parseApiError(err, 'Failed to start blocklist sync'))
-  } finally {
-    isSyncing.value = false
+    const message = parseApiError(err, 'Failed to start blocklist sync')
+    if (message.toLowerCase().includes('already in progress')) {
+      notify('Blocklist sync already running — waiting for completion')
+      startSyncPolling()
+      return
+    }
+    notify(message, 'error')
   }
 }
 
@@ -328,7 +367,7 @@ onUnmounted(() => {
           <template v-if="loadingStatus && blockedCount === null">—</template>
           <template v-else>{{ formatNumber(blockedCount ?? 0) }}</template>
         </p>
-        <p v-if="isSyncPolling" class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <p v-if="isSyncing" class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 class="size-3 animate-spin" />
           Syncing remote feeds...
         </p>

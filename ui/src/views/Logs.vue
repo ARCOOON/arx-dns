@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Loader2, Settings, Trash2 } from 'lucide-vue-next'
-import { toast } from 'vue-sonner'
+import { notify } from '@/composables/useNotifications'
 import {
   fetchLogsHistory,
   openLogsEventSource,
@@ -103,7 +103,7 @@ onMounted(async () => {
     await loadHistory()
     connectStream()
   } catch (err) {
-    toast.error(parseApiError(err, 'Failed to load logs'))
+    notify(parseApiError(err, 'Failed to load logs'), 'error')
   } finally {
     loading.value = false
   }

@@ -12,7 +12,7 @@ import {
   type ChartOptions,
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
-import { toast } from 'vue-sonner'
+import { notify } from '@/composables/useNotifications'
 import { ApiError } from '@/api/client'
 import { fetchStats, getStatsHistory, type StatsSnapshot } from '@/api/stats'
 import {
@@ -423,7 +423,7 @@ async function loadHistory(): Promise<void> {
     if (err instanceof ApiError && err.status === 401) {
       return
     }
-    toast.error(err instanceof Error ? err.message : 'Failed to load historical telemetry')
+    notify(err instanceof Error ? err.message : 'Failed to load historical telemetry', 'error')
   }
 }
 
@@ -436,7 +436,7 @@ async function loadStats(): Promise<void> {
     if (err instanceof ApiError && err.status === 401) {
       return
     }
-    toast.error(err instanceof Error ? err.message : 'Failed to load telemetry')
+    notify(err instanceof Error ? err.message : 'Failed to load telemetry', 'error')
   } finally {
     loading.value = false
   }

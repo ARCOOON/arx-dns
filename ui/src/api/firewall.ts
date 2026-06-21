@@ -25,6 +25,7 @@ export interface CustomBlocklistResponse {
 
 export interface FirewallStatusResponse {
   blocked_domains_count: number
+  sync_in_progress: boolean
 }
 
 export interface BlocklistMutationResponse {

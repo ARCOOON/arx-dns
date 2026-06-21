@@ -5,8 +5,10 @@ import {
   List,
   ScrollText,
   Settings,
+  ShieldAlert,
   ShieldBan,
 } from 'lucide-vue-next'
+import NotificationCenter from '@/components/NotificationCenter.vue'
 import { cn } from '@/lib/utils'
 
 const route = useRoute()
@@ -16,6 +18,7 @@ const navItems = [
   { to: '/zones', label: 'Zones & Records', icon: List, exact: false },
   { to: '/blocklists', label: 'Blocklists', icon: ShieldBan, exact: false },
   { to: '/logs', label: 'Logs', icon: ScrollText, exact: false },
+  { to: '/audit', label: 'Audit', icon: ShieldAlert, exact: false },
   { to: '/settings', label: 'Settings', icon: Settings, exact: false },
 ]
 
@@ -58,5 +61,7 @@ function isActive(path: string, exact: boolean): boolean {
         <RouterView />
       </main>
     </div>
+
+    <NotificationCenter />
   </div>
 </template>

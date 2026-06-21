@@ -6,6 +6,7 @@ const Dashboard = () => import('@/views/Dashboard.vue')
 const Zones = () => import('@/views/Zones.vue')
 const Blocklists = () => import('@/views/Blocklists.vue')
 const Logs = () => import('@/views/Logs.vue')
+const Audit = () => import('@/views/Audit.vue')
 const Settings = () => import('@/views/Settings.vue')
 
 const router = createRouter({
@@ -40,6 +41,11 @@ const router = createRouter({
           path: 'logs',
           name: 'logs',
           component: Logs,
+        },
+        {
+          path: 'audit',
+          name: 'audit',
+          component: Audit,
         },
         {
           path: 'settings',
