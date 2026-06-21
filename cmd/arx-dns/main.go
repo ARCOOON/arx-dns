@@ -17,6 +17,7 @@ import (
 	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/logger"
 	"github.com/ARCOOON/arx-dns/internal/network"
+	"github.com/ARCOOON/arx-dns/internal/runtime"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
@@ -49,6 +50,17 @@ func main() {
 	if err != nil {
 		slog.Default().Error("invalid log level configuration", "log_level", cfg.Server.LogLevel, "error", err)
 		os.Exit(1)
+	}
+	if err := logger.UpdateConfig(telemetryDB.Main(), logger.Config{
+		Level: cfg.Server.LogLevel,
+		Rotation: logger.RotationConfig{
+			FilePath:   cfg.Logging.FilePath,
+			MaxSizeMB:  cfg.Logging.MaxSizeMB,
+			MaxBackups: cfg.Logging.MaxBackups,
+			MaxAgeDays: cfg.Logging.MaxAgeDays,
+		},
+	}); err != nil {
+		log.Warn("failed to sync logging config from config.toml", "error", err)
 	}
 	logger := log
 
@@ -213,7 +225,19 @@ func main() {
 		"xfr_allowed_subnets", cfg.XFR.AllowedSubnets,
 		"notify_slaves", cfg.XFR.NotifySlaves,
 	)
-	apiServer := api.New(cfg, stats, telemetryDB, store, fw, queryACL, notifier, logger)
+	runtimeApplier := &runtime.Applier{
+		Processor:  proc,
+		Forwarder:  forwarder,
+		RateLimit:  rrl,
+		TrustedACL: acl,
+		XFRACL:     xfrACL,
+		Firewall:   fw,
+		Store:      store,
+		Telemetry:  telemetryDB,
+		Logger:     logger,
+	}
+
+	apiServer := api.New(cfg, *configPath, stats, telemetryDB, store, fw, queryACL, notifier, runtimeApplier, logger)
 	startService("api", apiServer.Run)
 	startService("udp", reactors.UDP.Run)
 	startService("tcp", reactors.TCP.Run)
