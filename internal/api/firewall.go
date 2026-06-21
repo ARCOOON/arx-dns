@@ -12,7 +12,8 @@ import (
 )
 
 type firewallStatusResponse struct {
-	BlockedDomainsCount int `json:"blocked_domains_count"`
+	BlockedDomainsCount int  `json:"blocked_domains_count"`
+	SyncInProgress      bool `json:"sync_in_progress"`
 }
 
 type blocklistSourcesResponse struct {
@@ -56,7 +57,10 @@ func (s *Server) handleFirewallStatus(w http.ResponseWriter, _ *http.Request) {
 	if s.firewall != nil {
 		count = s.firewall.BlockedDomainsCount()
 	}
-	writeJSON(w, http.StatusOK, firewallStatusResponse{BlockedDomainsCount: count})
+	writeJSON(w, http.StatusOK, firewallStatusResponse{
+		BlockedDomainsCount: count,
+		SyncInProgress:      firewall.SyncInProgress(),
+	})
 }
 
 func (s *Server) handleListBlocklistSources(w http.ResponseWriter, _ *http.Request) {
