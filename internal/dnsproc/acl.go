@@ -10,8 +10,10 @@ import (
 )
 
 type aclSnapshot struct {
-	enforced bool
-	prefixes []netip.Prefix
+	enforced   bool
+	hasAllow   bool
+	allowRules []netip.Prefix
+	blockRules []netip.Prefix
 }
 
 // QueryAccessChecker enforces IP/CIDR-based query access rules loaded from main.db.
@@ -46,8 +48,9 @@ func (c *QueryAccessChecker) Reload() error {
 	}
 
 	snap := aclSnapshot{
-		enforced: len(rules) > 0,
-		prefixes: make([]netip.Prefix, 0, len(rules)),
+		enforced:   len(rules) > 0,
+		allowRules: make([]netip.Prefix, 0, len(rules)),
+		blockRules: make([]netip.Prefix, 0, len(rules)),
 	}
 
 	for _, rule := range rules {
@@ -55,7 +58,13 @@ func (c *QueryAccessChecker) Reload() error {
 		if err != nil {
 			return fmt.Errorf("parse stored subnet %q: %w", rule.Subnet, err)
 		}
-		snap.prefixes = append(snap.prefixes, prefix.Masked())
+		switch rule.Action {
+		case acl.ActionBlock:
+			snap.blockRules = append(snap.blockRules, prefix.Masked())
+		default:
+			snap.hasAllow = true
+			snap.allowRules = append(snap.allowRules, prefix.Masked())
+		}
 	}
 
 	c.snap.Store(snap)
@@ -63,7 +72,7 @@ func (c *QueryAccessChecker) Reload() error {
 }
 
 // Allowed reports whether the client address may send DNS queries.
-// When no rules are configured, every address is allowed.
+// Block rules are evaluated first. When allow rules exist, only matching clients are permitted.
 func (c *QueryAccessChecker) Allowed(addr netip.Addr) bool {
 	if c == nil {
 		return true
@@ -79,10 +88,21 @@ func (c *QueryAccessChecker) Allowed(addr netip.Addr) bool {
 	}
 
 	addr = addr.Unmap()
-	for _, prefix := range snap.prefixes {
+
+	for _, prefix := range snap.blockRules {
 		if prefix.Contains(addr) {
-			return true
+			return false
 		}
 	}
-	return false
+
+	if snap.hasAllow {
+		for _, prefix := range snap.allowRules {
+			if prefix.Contains(addr) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return true
 }

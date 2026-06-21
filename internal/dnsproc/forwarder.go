@@ -253,6 +253,22 @@ func (f *Forwarder) SetECS(enabled bool, ipv4PrefixLen, ipv6PrefixLen uint8) {
 	f.ecsIPv6PrefixLen = ipv6PrefixLen
 }
 
+// SetUpstreams replaces the configured upstream resolver addresses.
+func (f *Forwarder) SetUpstreams(raw []string) error {
+	if f == nil {
+		return nil
+	}
+	cfg := config.Config{
+		Recursive: config.RecursiveConfig{Upstreams: raw},
+	}
+	addrs, err := cfg.NormalizedUpstreams()
+	if err != nil {
+		return err
+	}
+	f.upstreams = addrs
+	return nil
+}
+
 // PreWarm issues a lightweight recursive query through configured upstreams to
 // initialize the DNS client and establish early connectivity before listeners start.
 func (f *Forwarder) PreWarm() error {

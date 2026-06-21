@@ -10,10 +10,36 @@ import (
 
 	mdns "github.com/miekg/dns"
 
+	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
+
+// ApplyRuntimeConfig updates hot-reloadable processor fields from configuration.
+func (p *Processor) ApplyRuntimeConfig(cfg config.Config, trustedACL, xfrACL TrustedChecker) {
+	if p == nil {
+		return
+	}
+	p.acl = trustedACL
+	p.xfrACL = xfrACL
+	p.dnssecValidation = cfg.Security.DNSSECValidation
+	p.resolverMode = cfg.ResolverMode()
+	p.zonesDir = cfg.Zones.Directory
+	p.xfrEnabled = cfg.XFR.Enabled
+	p.tsigSecrets = cfg.NormalizedTSIGKeys()
+	if p.forwarder != nil {
+		p.forwarder.SetDNSSECValidation(cfg.Security.DNSSECValidation)
+		p.forwarder.SetECS(cfg.ECS.Enabled, uint8(cfg.ECS.IPv4PrefixLength), uint8(cfg.ECS.IPv6PrefixLength))
+	}
+	if cfg.Security.DNSSECValidation {
+		if res := p.activeResolver(); res != nil {
+			p.validator = NewDNSSECValidator(res, p.stats, p.logger)
+		}
+	} else {
+		p.validator = nil
+	}
+}
 
 const (
 	maxMessageSize     = 65535
