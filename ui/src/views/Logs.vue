@@ -1,28 +1,17 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { Loader2, Settings, Trash2 } from 'lucide-vue-next'
 import { ApiError } from '@/api/client'
 import {
-  fetchLogsConfig,
   fetchLogsHistory,
   openLogsEventSource,
   parseLogLine,
   shouldDisplayLevel,
-  updateLogsConfig,
   type LogLevelFilter,
-  type LogsConfig,
   type ParsedLogLine,
 } from '@/api/logs'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -38,19 +27,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const levelFilter = ref<LogLevelFilter>('ALL')
 const autoScroll = ref(true)
-const settingsOpen = ref(false)
-const savingSettings = ref(false)
 const terminalRef = ref<HTMLElement | null>(null)
-
-const settings = ref<LogsConfig>({
-  level: 'INFO',
-  rotation: {
-    file_path: './logs/arx-dns.log',
-    max_size_mb: 50,
-    max_backups: 3,
-    max_age_days: 28,
-  },
-})
 
 let eventSource: EventSource | null = null
 
@@ -121,10 +98,6 @@ async function loadHistory(): Promise<void> {
   rebuildVisibleLines(response.lines)
 }
 
-async function loadSettings(): Promise<void> {
-  settings.value = await fetchLogsConfig()
-}
-
 function connectStream(): void {
   eventSource?.close()
   eventSource = openLogsEventSource()
@@ -136,29 +109,6 @@ function connectStream(): void {
   eventSource.onerror = () => {
     eventSource?.close()
     window.setTimeout(connectStream, 2000)
-  }
-}
-
-async function openSettings(): Promise<void> {
-  error.value = null
-  try {
-    await loadSettings()
-    settingsOpen.value = true
-  } catch (err) {
-    error.value = parseApiError(err, 'Failed to load log settings')
-  }
-}
-
-async function saveSettings(): Promise<void> {
-  savingSettings.value = true
-  error.value = null
-  try {
-    settings.value = await updateLogsConfig(settings.value)
-    settingsOpen.value = false
-  } catch (err) {
-    error.value = parseApiError(err, 'Failed to save log settings')
-  } finally {
-    savingSettings.value = false
   }
 }
 
@@ -222,9 +172,11 @@ onBeforeUnmount(() => {
           <Trash2 class="mr-2 size-4" aria-hidden="true" />
           Clear
         </Button>
-        <Button variant="outline" size="sm" @click="openSettings">
-          <Settings class="mr-2 size-4" aria-hidden="true" />
-          Settings
+        <Button variant="outline" size="sm" as-child>
+          <RouterLink to="/settings?tab=logging">
+            <Settings class="mr-2 size-4" aria-hidden="true" />
+            Settings
+          </RouterLink>
         </Button>
       </div>
     </div>
@@ -253,61 +205,5 @@ onBeforeUnmount(() => {
         </p>
       </template>
     </div>
-
-    <Dialog v-model:open="settingsOpen">
-      <DialogContent class="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Log Settings</DialogTitle>
-          <DialogDescription>
-            Update runtime log level and file rotation parameters. Changes persist in main.db.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div class="grid gap-4 py-2">
-          <div class="grid gap-2">
-            <Label for="log-level">Log level</Label>
-            <Select :model-value="settings.level" @update:model-value="(value) => { settings.level = String(value) }">
-              <SelectTrigger id="log-level">
-                <SelectValue placeholder="Select level" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="DEBUG">DEBUG</SelectItem>
-                <SelectItem value="INFO">INFO</SelectItem>
-                <SelectItem value="WARN">WARN</SelectItem>
-                <SelectItem value="ERROR">ERROR</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div class="grid gap-2">
-            <Label for="log-file">Log file path</Label>
-            <Input id="log-file" v-model="settings.rotation.file_path" />
-          </div>
-
-          <div class="grid grid-cols-3 gap-3">
-            <div class="grid gap-2">
-              <Label for="max-size">Max size (MB)</Label>
-              <Input id="max-size" v-model.number="settings.rotation.max_size_mb" type="number" min="1" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="max-backups">Max backups</Label>
-              <Input id="max-backups" v-model.number="settings.rotation.max_backups" type="number" min="0" />
-            </div>
-            <div class="grid gap-2">
-              <Label for="max-age">Max age (days)</Label>
-              <Input id="max-age" v-model.number="settings.rotation.max_age_days" type="number" min="0" />
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" @click="settingsOpen = false">Cancel</Button>
-          <Button :disabled="savingSettings" @click="saveSettings">
-            <Loader2 v-if="savingSettings" class="mr-2 size-4 animate-spin" aria-hidden="true" />
-            Save
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   </div>
 </template>
