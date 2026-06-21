@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { Loader2, Settings, Trash2 } from 'lucide-vue-next'
-import { ApiError } from '@/api/client'
+import { toast } from 'vue-sonner'
 import {
   fetchLogsHistory,
   openLogsEventSource,
@@ -21,30 +21,15 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { parseApiError } from '@/utils/apiError'
 
 const lines = ref<ParsedLogLine[]>([])
 const loading = ref(true)
-const error = ref<string | null>(null)
 const levelFilter = ref<LogLevelFilter>('ALL')
 const autoScroll = ref(true)
 const terminalRef = ref<HTMLElement | null>(null)
 
 let eventSource: EventSource | null = null
-
-function parseApiError(err: unknown, fallback: string): string {
-  if (!(err instanceof ApiError)) {
-    return fallback
-  }
-  try {
-    const parsed = JSON.parse(err.message) as { error?: string }
-    if (parsed.error) {
-      return parsed.error
-    }
-  } catch {
-    // Use raw message when the body is not JSON.
-  }
-  return err.message || fallback
-}
 
 function levelClass(level: string): string {
   switch (level.toUpperCase()) {
@@ -114,12 +99,11 @@ function connectStream(): void {
 
 onMounted(async () => {
   loading.value = true
-  error.value = null
   try {
     await loadHistory()
     connectStream()
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load logs')
+    toast.error(parseApiError(err, 'Failed to load logs'))
   } finally {
     loading.value = false
   }
@@ -180,11 +164,6 @@ onBeforeUnmount(() => {
         </Button>
       </div>
     </div>
-
-    <p v-if="error"
-      class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-      {{ error }}
-    </p>
 
     <div ref="terminalRef"
       class="min-h-0 flex-1 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs leading-5 text-zinc-100 shadow-inner"

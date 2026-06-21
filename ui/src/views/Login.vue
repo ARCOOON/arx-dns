@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { toast } from 'vue-sonner'
 import { setToken } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -13,17 +14,15 @@ import {
 
 const router = useRouter()
 const token = ref(localStorage.getItem('arx_token') ?? '')
-const error = ref<string | null>(null)
 
 function onSubmit(): void {
   const trimmed = token.value.trim()
   if (!trimmed) {
-    error.value = 'Enter a valid API bearer token.'
+    toast.error('Enter a valid API bearer token.')
     return
   }
 
   setToken(trimmed)
-  error.value = null
   const redirect = typeof router.currentRoute.value.query.redirect === 'string'
     ? router.currentRoute.value.query.redirect
     : '/'
@@ -54,14 +53,6 @@ function onSubmit(): void {
               placeholder="dev-token-change-me"
             />
           </div>
-
-          <p
-            v-if="error"
-            class="text-sm text-destructive"
-            role="alert"
-          >
-            {{ error }}
-          </p>
 
           <Button type="submit" class="w-full">
             Continue

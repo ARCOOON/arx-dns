@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import { Loader2, Plus, RefreshCw, ShieldBan, Trash2 } from 'lucide-vue-next'
-import { ApiError } from '@/api/client'
+import { toast } from 'vue-sonner'
 import {
   createBlocklistSource,
   createCustomBlocklistDomain,
@@ -35,6 +35,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { parseApiError } from '@/utils/apiError'
 
 const STATUS_POLL_MS = 2000
 const SYNC_POLL_MAX_MS = 120000
@@ -47,7 +48,6 @@ const loadingCustom = ref(true)
 const loadingStatus = ref(true)
 const isSyncing = ref(false)
 const isSyncPolling = ref(false)
-const error = ref<string | null>(null)
 const addSourceDialogOpen = ref(false)
 const addCustomDialogOpen = ref(false)
 const newSourceURL = ref('')
@@ -79,21 +79,6 @@ function formatDateTime(value?: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
-}
-
-function parseApiError(err: unknown, fallback: string): string {
-  if (!(err instanceof ApiError)) {
-    return fallback
-  }
-  try {
-    const parsed = JSON.parse(err.message) as { error?: string }
-    if (parsed.error) {
-      return parsed.error
-    }
-  } catch {
-    // Use raw message when the body is not JSON.
-  }
-  return err.message || fallback
 }
 
 function clearSyncPolling(): void {
@@ -130,7 +115,7 @@ async function loadStatus(): Promise<void> {
     const response = await fetchFirewallStatus()
     blockedCount.value = response.blocked_domains_count
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load firewall status')
+    toast.error(parseApiError(err, 'Failed to load firewall status'))
   } finally {
     loadingStatus.value = false
   }
@@ -144,7 +129,7 @@ async function loadSources(silent = false): Promise<void> {
     const response = await fetchBlocklistSources()
     sources.value = response.sources
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load blocklist sources')
+    toast.error(parseApiError(err, 'Failed to load blocklist sources'))
   } finally {
     if (!silent) {
       loadingSources.value = false
@@ -158,7 +143,7 @@ async function loadCustomDomains(): Promise<void> {
     const response = await fetchCustomBlocklist()
     customDomains.value = response.domains
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load custom blocklist domains')
+    toast.error(parseApiError(err, 'Failed to load custom blocklist domains'))
   } finally {
     loadingCustom.value = false
   }
@@ -182,15 +167,15 @@ async function submitSource(): Promise<void> {
   }
 
   creatingSource.value = true
-  error.value = null
   try {
     await createBlocklistSource(url, newSourceDescription.value.trim() || undefined)
     addSourceDialogOpen.value = false
     newSourceURL.value = ''
     newSourceDescription.value = ''
     await loadSources()
+    toast.success('Blocklist source added')
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to add blocklist source')
+    toast.error(parseApiError(err, 'Failed to add blocklist source'))
   } finally {
     creatingSource.value = false
   }
@@ -203,14 +188,14 @@ async function submitCustomDomain(): Promise<void> {
   }
 
   creatingCustom.value = true
-  error.value = null
   try {
     await createCustomBlocklistDomain(domain)
     addCustomDialogOpen.value = false
     newCustomDomain.value = ''
     await Promise.all([loadCustomDomains(), loadStatus()])
+    toast.success('Custom domain blocked')
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to add custom blocklist domain')
+    toast.error(parseApiError(err, 'Failed to add custom blocklist domain'))
   } finally {
     creatingCustom.value = false
   }
@@ -218,12 +203,12 @@ async function submitCustomDomain(): Promise<void> {
 
 async function removeSource(source: BlocklistSource): Promise<void> {
   deletingSourceId.value = source.id
-  error.value = null
   try {
     await deleteBlocklistSource(source.id)
     await loadSources()
+    toast.success('Blocklist source removed')
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to delete blocklist source')
+    toast.error(parseApiError(err, 'Failed to delete blocklist source'))
   } finally {
     deletingSourceId.value = null
   }
@@ -231,7 +216,6 @@ async function removeSource(source: BlocklistSource): Promise<void> {
 
 async function toggleSourceEnabled(source: BlocklistSource, enabled: boolean): Promise<void> {
   togglingSourceId.value = source.id
-  error.value = null
   const previous = source.enabled
   source.enabled = enabled
   try {
@@ -245,7 +229,7 @@ async function toggleSourceEnabled(source: BlocklistSource, enabled: boolean): P
     await loadStatus()
   } catch (err) {
     source.enabled = previous
-    error.value = parseApiError(err, 'Failed to update blocklist source')
+    toast.error(parseApiError(err, 'Failed to update blocklist source'))
   } finally {
     togglingSourceId.value = null
   }
@@ -253,12 +237,12 @@ async function toggleSourceEnabled(source: BlocklistSource, enabled: boolean): P
 
 async function removeCustomDomain(entry: CustomBlocklistEntry): Promise<void> {
   deletingCustomId.value = entry.id
-  error.value = null
   try {
     await deleteCustomBlocklistDomain(entry.id)
     await Promise.all([loadCustomDomains(), loadStatus()])
+    toast.success('Custom domain removed')
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to delete custom blocklist domain')
+    toast.error(parseApiError(err, 'Failed to delete custom blocklist domain'))
   } finally {
     deletingCustomId.value = null
   }
@@ -270,12 +254,12 @@ async function triggerSync(): Promise<void> {
   }
 
   isSyncing.value = true
-  error.value = null
   pauseStatusPolling()
   clearSyncPolling()
 
   try {
     await syncBlocklists()
+    toast.success('Blocklist sync started')
     isSyncPolling.value = true
     syncPollTimer = setInterval(() => {
       void Promise.all([loadStatus(), loadSources(true)])
@@ -288,7 +272,7 @@ async function triggerSync(): Promise<void> {
   } catch (err) {
     clearSyncPolling()
     resumeStatusPolling()
-    error.value = parseApiError(err, 'Failed to start blocklist sync')
+    toast.error(parseApiError(err, 'Failed to start blocklist sync'))
   } finally {
     isSyncing.value = false
   }
@@ -330,13 +314,6 @@ onUnmounted(() => {
         </Button>
       </div>
     </div>
-
-    <p
-      v-if="error"
-      class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-    >
-      {{ error }}
-    </p>
 
     <Card>
       <CardHeader>

@@ -12,6 +12,7 @@ import {
   type ChartOptions,
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
+import { toast } from 'vue-sonner'
 import { ApiError } from '@/api/client'
 import { fetchStats, getStatsHistory, type StatsSnapshot } from '@/api/stats'
 import {
@@ -101,7 +102,6 @@ function appendRollingLabel(current: string[], label: string): string[] {
 
 const stats = ref<StatsSnapshot | null>(null)
 const loading = ref(true)
-const error = ref<string | null>(null)
 
 const timeWindow = ref<TimeWindow>('live')
 const isLiveMode = computed(() => timeWindow.value === 'live')
@@ -419,12 +419,11 @@ async function loadHistory(): Promise<void> {
     qpsHistory.value = qpsValues
     cacheHitsHistory.value = cacheValues
     refreshChartData()
-    error.value = null
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       return
     }
-    error.value = err instanceof Error ? err.message : 'Failed to load historical telemetry'
+    toast.error(err instanceof Error ? err.message : 'Failed to load historical telemetry')
   }
 }
 
@@ -433,12 +432,11 @@ async function loadStats(): Promise<void> {
     const snapshot = await fetchStats()
     recordMetricDeltas(snapshot)
     stats.value = snapshot
-    error.value = null
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       return
     }
-    error.value = err instanceof Error ? err.message : 'Failed to load telemetry'
+    toast.error(err instanceof Error ? err.message : 'Failed to load telemetry')
   } finally {
     loading.value = false
   }
@@ -514,14 +512,6 @@ onUnmounted(() => {
         {{ telemetryDescription }}
       </p>
     </header>
-
-    <p
-      v-if="error"
-      class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-      role="alert"
-    >
-      {{ error }}
-    </p>
 
     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card>

@@ -5,6 +5,7 @@ import {
   Activity,
   FileText,
   Loader2,
+  Monitor,
   Pencil,
   Plus,
   Save,
@@ -12,8 +13,8 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 import { fetchAuditLogs, type AuditLogEntry } from '@/api/audit'
-import { ApiError } from '@/api/client'
 import {
   cloneAppConfig,
   fetchConfig,
@@ -56,7 +57,14 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-const TAB_IDS = ['dns', 'security', 'logging', 'audit'] as const
+import {
+  TOAST_POSITION_OPTIONS,
+  useToastPosition,
+  type ToastPosition,
+} from '@/composables/useToastPosition'
+import { parseApiError } from '@/utils/apiError'
+
+const TAB_IDS = ['dns', 'security', 'logging', 'audit', 'ui'] as const
 type TabId = (typeof TAB_IDS)[number]
 
 const route = useRoute()
@@ -67,8 +75,8 @@ const config = ref<AppConfig | null>(null)
 const configLoading = ref(true)
 const configSaving = ref(false)
 const requiresRestart = ref(false)
-const error = ref<string | null>(null)
-const success = ref<string | null>(null)
+
+const toastPosition = useToastPosition()
 
 const upstreams = ref<string[]>([])
 const trustedSubnets = ref<string[]>([])
@@ -93,21 +101,6 @@ const deletingTrustedIndex = ref<number | null>(null)
 
 const auditLogs = ref<AuditLogEntry[]>([])
 const auditLoading = ref(true)
-
-function parseApiError(err: unknown, fallback: string): string {
-  if (!(err instanceof ApiError)) {
-    return fallback
-  }
-  try {
-    const parsed = JSON.parse(err.message) as { error?: string }
-    if (parsed.error) {
-      return parsed.error
-    }
-  } catch {
-    // Use raw message when the body is not JSON.
-  }
-  return err.message || fallback
-}
 
 function isValidTab(value: string): value is TabId {
   return TAB_IDS.includes(value as TabId)
@@ -141,13 +134,12 @@ function buildConfigPayload(): AppConfig {
 
 async function loadConfig(): Promise<void> {
   configLoading.value = true
-  error.value = null
   try {
     const loaded = await fetchConfig()
     config.value = loaded
     applyConfigToForm(loaded)
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load configuration')
+    toast.error(parseApiError(err, 'Failed to load configuration'))
   } finally {
     configLoading.value = false
   }
@@ -158,17 +150,15 @@ async function saveConfig(section: string): Promise<void> {
     return
   }
   configSaving.value = true
-  error.value = null
-  success.value = null
   try {
     const response = await updateConfig(buildConfigPayload())
     if (response.requires_restart) {
       requiresRestart.value = true
     }
-    success.value = `${section} settings saved`
+    toast.success(`${section} settings saved`)
     await loadConfig()
   } catch (err) {
-    error.value = parseApiError(err, `Failed to save ${section.toLowerCase()} settings`)
+    toast.error(parseApiError(err, `Failed to save ${section.toLowerCase()} settings`))
   } finally {
     configSaving.value = false
   }
@@ -180,7 +170,7 @@ async function loadRules(): Promise<void> {
     const response = await fetchACLRules()
     rules.value = response.rules
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load ACL rules')
+    toast.error(parseApiError(err, 'Failed to load ACL rules'))
   } finally {
     aclLoading.value = false
   }
@@ -205,16 +195,15 @@ function openEditRuleDialog(rule: ACLRule): void {
 async function submitRuleDialog(): Promise<void> {
   const subnet = ruleSubnet.value.trim()
   if (!subnet) {
-    error.value = 'Subnet or IP address is required'
+    toast.error('Subnet or IP address is required')
     return
   }
 
   savingRule.value = true
-  error.value = null
   try {
     if (editingRuleId.value === null) {
       await createACLRule(subnet, ruleDescription.value, ruleAction.value)
-      success.value = 'ACL rule added'
+      toast.success('ACL rule added')
     } else {
       await updateACLRule(
         editingRuleId.value,
@@ -222,12 +211,12 @@ async function submitRuleDialog(): Promise<void> {
         ruleDescription.value,
         ruleAction.value,
       )
-      success.value = 'ACL rule updated'
+      toast.success('ACL rule updated')
     }
     ruleDialogOpen.value = false
     await loadRules()
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to save ACL rule')
+    toast.error(parseApiError(err, 'Failed to save ACL rule'))
   } finally {
     savingRule.value = false
   }
@@ -235,13 +224,12 @@ async function submitRuleDialog(): Promise<void> {
 
 async function removeRule(id: number): Promise<void> {
   deletingId.value = id
-  error.value = null
   try {
     await deleteACLRule(id)
     await loadRules()
-    success.value = 'ACL rule removed'
+    toast.success('ACL rule removed')
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to delete ACL rule')
+    toast.error(parseApiError(err, 'Failed to delete ACL rule'))
   } finally {
     deletingId.value = null
   }
@@ -255,16 +243,15 @@ function openTrustedDialog(): void {
 function addTrustedSubnet(): void {
   const subnet = trustedSubnetInput.value.trim()
   if (!subnet) {
-    error.value = 'Subnet or IP address is required'
+    toast.error('Subnet or IP address is required')
     return
   }
   if (trustedSubnets.value.includes(subnet)) {
-    error.value = 'Subnet is already listed'
+    toast.error('Subnet is already listed')
     return
   }
   trustedSubnets.value = [...trustedSubnets.value, subnet]
   trustedDialogOpen.value = false
-  error.value = null
 }
 
 function removeTrustedSubnet(index: number): void {
@@ -281,16 +268,15 @@ function openUpstreamDialog(): void {
 function addUpstream(): void {
   const upstream = upstreamInput.value.trim()
   if (!upstream) {
-    error.value = 'Upstream IP or hostname is required'
+    toast.error('Upstream IP or hostname is required')
     return
   }
   if (upstreams.value.includes(upstream)) {
-    error.value = 'Upstream is already listed'
+    toast.error('Upstream is already listed')
     return
   }
   upstreams.value = [...upstreams.value, upstream]
   upstreamDialogOpen.value = false
-  error.value = null
 }
 
 function removeUpstream(index: number): void {
@@ -311,7 +297,7 @@ async function loadAuditLogs(): Promise<void> {
     const response = await fetchAuditLogs()
     auditLogs.value = response.logs
   } catch (err) {
-    error.value = parseApiError(err, 'Failed to load audit trail')
+    toast.error(parseApiError(err, 'Failed to load audit trail'))
   } finally {
     auditLoading.value = false
   }
@@ -366,22 +352,8 @@ onMounted(() => {
       Restart required to apply network changes.
     </Alert>
 
-    <p
-      v-if="error"
-      class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-    >
-      {{ error }}
-    </p>
-
-    <p
-      v-if="success"
-      class="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-400"
-    >
-      {{ success }}
-    </p>
-
     <Tabs v-model="activeTab" class="space-y-4">
-      <TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+      <TabsList class="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
         <TabsTrigger value="dns" class="gap-1.5">
           <Server class="size-4" />
           DNS &amp; System
@@ -397,6 +369,10 @@ onMounted(() => {
         <TabsTrigger value="audit" class="gap-1.5">
           <Activity class="size-4" />
           Audit Trail
+        </TabsTrigger>
+        <TabsTrigger value="ui" class="gap-1.5">
+          <Monitor class="size-4" />
+          UI Preferences
         </TabsTrigger>
       </TabsList>
 
@@ -871,6 +847,42 @@ onMounted(() => {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="ui">
+        <Card>
+          <CardHeader>
+            <CardTitle>UI Preferences</CardTitle>
+            <CardDescription>
+              Client-side display options stored in this browser only.
+            </CardDescription>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="grid gap-2 sm:max-w-xs">
+              <Label for="toast-position">Notification position</Label>
+              <Select
+                :model-value="toastPosition"
+                @update:model-value="(v) => { toastPosition = String(v) as ToastPosition }"
+              >
+                <SelectTrigger id="toast-position">
+                  <SelectValue placeholder="Select position" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="position in TOAST_POSITION_OPTIONS"
+                    :key="position"
+                    :value="position"
+                  >
+                    {{ position }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-xs text-muted-foreground">
+                Controls where toast notifications appear across the management console.
+              </p>
             </div>
           </CardContent>
         </Card>

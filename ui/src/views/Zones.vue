@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { toast } from 'vue-sonner'
 import {
-  ApiError,
   createZone,
   createZoneRecord,
   deleteZone,
@@ -77,6 +77,7 @@ import {
   type RecordType,
   validateRecordForm,
 } from '@/utils/dnsFormatting'
+import { parseApiError } from '@/utils/apiError'
 
 type ZoneView = 'public' | 'internal'
 
@@ -85,7 +86,6 @@ const selectedZone = ref<ZoneInfo | null>(null)
 const records = ref<ZoneRecord[]>([])
 const loadingZones = ref(true)
 const loadingRecords = ref(false)
-const error = ref<string | null>(null)
 const recordDialogOpen = ref(false)
 const addZoneDialogOpen = ref(false)
 const deleteZoneDialogOpen = ref(false)
@@ -178,7 +178,6 @@ function isSelected(zone: ZoneInfo): boolean {
 
 async function loadZones(): Promise<void> {
   loadingZones.value = true
-  error.value = null
   try {
     const response = await fetchZones()
     zones.value = response.zones
@@ -189,7 +188,7 @@ async function loadZones(): Promise<void> {
       selectedZone.value = match ?? zones.value[0] ?? null
     }
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to load zones'
+    toast.error(parseApiError(err, 'Failed to load zones'))
   } finally {
     loadingZones.value = false
   }
@@ -202,7 +201,6 @@ async function loadRecords(): Promise<void> {
   }
 
   loadingRecords.value = true
-  error.value = null
   try {
     const response = await fetchZoneRecords(
       selectedZone.value.origin,
@@ -211,7 +209,7 @@ async function loadRecords(): Promise<void> {
     records.value = response.records
   } catch (err) {
     records.value = []
-    error.value = err instanceof ApiError ? err.message : 'Failed to load records'
+    toast.error(parseApiError(err, 'Failed to load records'))
   } finally {
     loadingRecords.value = false
   }
@@ -261,7 +259,6 @@ async function submitZone(): Promise<void> {
   }
 
   creatingZone.value = true
-  error.value = null
   try {
     await createZone(name, newZoneView.value)
     addZoneDialogOpen.value = false
@@ -276,8 +273,9 @@ async function submitZone(): Promise<void> {
       selectedZone.value = created
     }
     await loadRecords()
+    toast.success('Zone created')
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to create zone'
+    toast.error(parseApiError(err, 'Failed to create zone'))
   } finally {
     creatingZone.value = false
   }
@@ -289,7 +287,6 @@ async function confirmDeleteZone(): Promise<void> {
   }
 
   deletingZone.value = true
-  error.value = null
   try {
     await deleteZone(selectedZone.value.origin, selectedZone.value.view)
     deleteZoneDialogOpen.value = false
@@ -297,8 +294,9 @@ async function confirmDeleteZone(): Promise<void> {
     records.value = []
     await loadZones()
     await loadRecords()
+    toast.success('Zone deleted')
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to delete zone'
+    toast.error(parseApiError(err, 'Failed to delete zone'))
   } finally {
     deletingZone.value = false
   }
@@ -316,7 +314,6 @@ async function submitRecord(): Promise<void> {
   }
 
   submitting.value = true
-  error.value = null
   const payload = {
     name: form.value.name.trim(),
     type: form.value.type,
@@ -332,19 +329,21 @@ async function submitRecord(): Promise<void> {
         editingRecordId.value,
         payload,
       )
+      toast.success('Record updated')
     } else {
       await createZoneRecord(selectedZone.value.origin, payload)
+      toast.success('Record created')
     }
     recordDialogOpen.value = false
     resetForm()
     await Promise.all([loadZones(), loadRecords()])
   } catch (err) {
-    error.value =
-      err instanceof ApiError
-        ? err.message
-        : isEditingRecord.value
-          ? 'Failed to update record'
-          : 'Failed to create record'
+    toast.error(
+      parseApiError(
+        err,
+        isEditingRecord.value ? 'Failed to update record' : 'Failed to create record',
+      ),
+    )
   } finally {
     submitting.value = false
   }
@@ -357,7 +356,6 @@ async function confirmDeleteRecord(): Promise<void> {
 
   const record = recordPendingDelete.value
   deletingId.value = record.id
-  error.value = null
   try {
     await deleteZoneRecord(
       selectedZone.value.origin,
@@ -367,8 +365,9 @@ async function confirmDeleteRecord(): Promise<void> {
     deleteRecordDialogOpen.value = false
     recordPendingDelete.value = null
     await Promise.all([loadZones(), loadRecords()])
+    toast.success('Record deleted')
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : 'Failed to delete record'
+    toast.error(parseApiError(err, 'Failed to delete record'))
   } finally {
     deletingId.value = null
   }
@@ -419,10 +418,6 @@ onMounted(async () => {
         </Button>
       </div>
     </div>
-
-    <p v-if="error" class="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-      {{ error }}
-    </p>
 
     <div class="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
       <Card class="h-fit">
@@ -530,8 +525,14 @@ onMounted(async () => {
                         @click="openEditDialog(record)">
                         <Pencil class="size-4" />
                       </Button>
-                      <Button variant="ghost" size="icon-sm" :disabled="deletingId === record.id"
-                        :aria-label="`Delete ${record.name} ${record.type}`" @click="openDeleteRecordDialog(record)">
+                      <Button
+                        v-if="record.type !== 'SOA'"
+                        variant="ghost"
+                        size="icon-sm"
+                        :disabled="deletingId === record.id"
+                        :aria-label="`Delete ${record.name} ${record.type}`"
+                        @click="openDeleteRecordDialog(record)"
+                      >
                         <Loader2 v-if="deletingId === record.id" class="size-4 animate-spin" />
                         <Trash2 v-else class="size-4 text-destructive" />
                       </Button>
