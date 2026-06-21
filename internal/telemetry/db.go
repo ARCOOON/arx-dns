@@ -93,6 +93,10 @@ func OpenDB(dataDir string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := db.migrateAuditSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 
 	return db, nil
 }
@@ -167,7 +171,8 @@ CREATE TABLE IF NOT EXISTS blocklist_custom (
 CREATE TABLE IF NOT EXISTS acl_rules (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	subnet TEXT NOT NULL UNIQUE,
-	description TEXT
+	description TEXT,
+	action TEXT NOT NULL DEFAULT 'allow'
 );
 `
 
@@ -230,12 +235,25 @@ func (db *DB) migrateACLSchema() error {
 CREATE TABLE IF NOT EXISTS acl_rules (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	subnet TEXT NOT NULL UNIQUE,
-	description TEXT
+	description TEXT,
+	action TEXT NOT NULL DEFAULT 'allow'
 );
 `
 	if _, err := db.main.Exec(schema); err != nil {
 		return fmt.Errorf("migrate acl_rules table: %w", err)
 	}
+
+	columns, err := db.mainTableColumns("acl_rules")
+	if err != nil {
+		return err
+	}
+	if !columns["action"] {
+		const ddl = `ALTER TABLE acl_rules ADD COLUMN action TEXT NOT NULL DEFAULT 'allow';`
+		if _, err := db.main.Exec(ddl); err != nil {
+			return fmt.Errorf("migrate acl_rules column action: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -248,6 +266,28 @@ CREATE TABLE IF NOT EXISTS configuration (
 `
 	if _, err := db.main.Exec(schema); err != nil {
 		return fmt.Errorf("migrate configuration table: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) migrateAuditSchema() error {
+	const schema = `
+CREATE TABLE IF NOT EXISTS audit_logs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	timestamp DATETIME NOT NULL,
+	client_ip TEXT NOT NULL,
+	action TEXT NOT NULL,
+	target TEXT,
+	details TEXT,
+	method TEXT NOT NULL,
+	path TEXT NOT NULL,
+	status INTEGER NOT NULL,
+	success INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+`
+	if _, err := db.main.Exec(schema); err != nil {
+		return fmt.Errorf("migrate audit_logs table: %w", err)
 	}
 	return nil
 }
