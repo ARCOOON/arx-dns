@@ -89,6 +89,20 @@ func (r *RateLimiter) Close() {
 	})
 }
 
+// Reconfigure updates rate limiting parameters without restarting listeners.
+func (r *RateLimiter) Reconfigure(cfg config.RateLimitConfig) {
+	if r == nil {
+		return
+	}
+	r.enabled = cfg.Enabled
+	if cfg.RequestsPerSecond > 0 {
+		r.limit = rate.Limit(cfg.RequestsPerSecond)
+	}
+	if cfg.Burst > 0 {
+		r.burst = cfg.Burst
+	}
+}
+
 func (r *RateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rrlCleanupInterval)
 	defer ticker.Stop()
