@@ -49,6 +49,11 @@ func (e *Engine) Action() BlockAction {
 	return e.action
 }
 
+// SetAction updates the response action for blocked queries.
+func (e *Engine) SetAction(action BlockAction) {
+	e.action = action
+}
+
 // SwapTree atomically replaces the blocklist radix tree.
 func (e *Engine) SwapTree(tree *radix.Tree) {
 	if tree == nil {
