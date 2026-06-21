@@ -8,11 +8,17 @@ import (
 	"strings"
 )
 
-// Rule is one allowed client subnet stored in main.db.
+const (
+	ActionAllow = "allow"
+	ActionBlock = "block"
+)
+
+// Rule is one client subnet policy stored in main.db.
 type Rule struct {
 	ID          int64  `json:"id"`
 	Subnet      string `json:"subnet"`
 	Description string `json:"description,omitempty"`
+	Action      string `json:"action"`
 }
 
 var (
@@ -22,7 +28,23 @@ var (
 	ErrRuleAlreadyExists = errors.New("acl rule already exists")
 	// ErrInvalidSubnet is returned when a subnet is empty or not a valid IP/CIDR.
 	ErrInvalidSubnet = errors.New("invalid subnet")
+	// ErrInvalidAction is returned when an action is not allow or block.
+	ErrInvalidAction = errors.New("invalid action")
 )
+
+// NormalizeAction validates and canonicalizes an ACL action.
+func NormalizeAction(raw string) (string, error) {
+	action := strings.ToLower(strings.TrimSpace(raw))
+	if action == "" {
+		return ActionAllow, nil
+	}
+	switch action {
+	case ActionAllow, ActionBlock:
+		return action, nil
+	default:
+		return "", ErrInvalidAction
+	}
+}
 
 // NormalizeSubnet validates and canonicalizes an IP address or CIDR prefix.
 func NormalizeSubnet(raw string) (string, error) {
@@ -50,8 +72,8 @@ func NormalizeSubnet(raw string) (string, error) {
 	return fmt.Sprintf("%s/%d", network.IP.String(), ones), nil
 }
 
-// InsertRule registers a new allowed client subnet.
-func InsertRule(db *sql.DB, subnet, description string) (Rule, error) {
+// InsertRule registers a new client subnet policy.
+func InsertRule(db *sql.DB, subnet, description, action string) (Rule, error) {
 	if db == nil {
 		return Rule{}, fmt.Errorf("database handle is nil")
 	}
@@ -61,25 +83,82 @@ func InsertRule(db *sql.DB, subnet, description string) (Rule, error) {
 		return Rule{}, err
 	}
 
+	normalizedAction, err := NormalizeAction(action)
+	if err != nil {
+		return Rule{}, err
+	}
+
 	description = strings.TrimSpace(description)
 
 	const query = `
-INSERT INTO acl_rules (subnet, description)
-VALUES (?, ?)
-RETURNING id, subnet, description;
+INSERT INTO acl_rules (subnet, description, action)
+VALUES (?, ?, ?)
+RETURNING id, subnet, description, action;
 `
 
 	var rule Rule
 	var descriptionCol sql.NullString
-	if err := db.QueryRow(query, normalized, nullableDescription(description)).Scan(
+	if err := db.QueryRow(query, normalized, nullableDescription(description), normalizedAction).Scan(
 		&rule.ID,
 		&rule.Subnet,
 		&descriptionCol,
+		&rule.Action,
 	); err != nil {
 		if isUniqueConstraintError(err) {
 			return Rule{}, ErrRuleAlreadyExists
 		}
 		return Rule{}, fmt.Errorf("insert acl rule: %w", err)
+	}
+	if descriptionCol.Valid {
+		rule.Description = strings.TrimSpace(descriptionCol.String)
+	}
+
+	return rule, nil
+}
+
+// UpdateRule modifies an existing ACL rule.
+func UpdateRule(db *sql.DB, id int64, subnet, description, action string) (Rule, error) {
+	if db == nil {
+		return Rule{}, fmt.Errorf("database handle is nil")
+	}
+	if id <= 0 {
+		return Rule{}, ErrRuleNotFound
+	}
+
+	normalized, err := NormalizeSubnet(subnet)
+	if err != nil {
+		return Rule{}, err
+	}
+
+	normalizedAction, err := NormalizeAction(action)
+	if err != nil {
+		return Rule{}, err
+	}
+
+	description = strings.TrimSpace(description)
+
+	const query = `
+UPDATE acl_rules
+SET subnet = ?, description = ?, action = ?
+WHERE id = ?
+RETURNING id, subnet, description, action;
+`
+
+	var rule Rule
+	var descriptionCol sql.NullString
+	if err := db.QueryRow(query, normalized, nullableDescription(description), normalizedAction, id).Scan(
+		&rule.ID,
+		&rule.Subnet,
+		&descriptionCol,
+		&rule.Action,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Rule{}, ErrRuleNotFound
+		}
+		if isUniqueConstraintError(err) {
+			return Rule{}, ErrRuleAlreadyExists
+		}
+		return Rule{}, fmt.Errorf("update acl rule: %w", err)
 	}
 	if descriptionCol.Valid {
 		rule.Description = strings.TrimSpace(descriptionCol.String)
@@ -95,7 +174,7 @@ func ListRules(db *sql.DB) ([]Rule, error) {
 	}
 
 	const query = `
-SELECT id, subnet, description
+SELECT id, subnet, description, action
 FROM acl_rules
 ORDER BY id ASC;
 `
@@ -151,11 +230,14 @@ func DeleteRule(db *sql.DB, id int64) error {
 func scanRule(scan func(dest ...any) error) (Rule, error) {
 	var rule Rule
 	var description sql.NullString
-	if err := scan(&rule.ID, &rule.Subnet, &description); err != nil {
+	if err := scan(&rule.ID, &rule.Subnet, &description, &rule.Action); err != nil {
 		return Rule{}, fmt.Errorf("scan acl rule: %w", err)
 	}
 	if description.Valid {
 		rule.Description = strings.TrimSpace(description.String)
+	}
+	if rule.Action == "" {
+		rule.Action = ActionAllow
 	}
 	return rule, nil
 }
