@@ -82,6 +82,7 @@ func main() {
 
 	// Step 3: Fetch/load root hints (falls back to built-in addresses on failure).
 	rootHints := dnsproc.LoadRootHints(
+		&cfg,
 		cfg.Resolver.RootHintsFile,
 		cfg.Resolver.AutoUpdateRootHints,
 		config.DefaultRootHints(),
