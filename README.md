@@ -26,4 +26,4 @@ Docker: `docker compose up -d --build`
 git submodule update --init wiki
 ```
 
-Browse locally: [`wiki/Home.md`](wiki/Home.md) · [GitHub wiki repo](https://github.com/ARCOOON/arx-dns.wiki)
+Browse locally: [`wiki/Home.md`](wiki/Home.md) · [GitHub wiki](https://github.com/ARCOOON/arx-dns/wiki)
