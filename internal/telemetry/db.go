@@ -97,6 +97,10 @@ func OpenDB(dataDir string) (*DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := db.migrateDNSSECSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 
 	return db, nil
 }
@@ -266,6 +270,26 @@ CREATE TABLE IF NOT EXISTS configuration (
 `
 	if _, err := db.main.Exec(schema); err != nil {
 		return fmt.Errorf("migrate configuration table: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) migrateDNSSECSchema() error {
+	const schema = `
+CREATE TABLE IF NOT EXISTS dnssec_keys (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	zone TEXT NOT NULL,
+	view TEXT NOT NULL DEFAULT 'public',
+	key_type TEXT NOT NULL CHECK(key_type IN ('KSK', 'ZSK')),
+	algorithm INTEGER NOT NULL,
+	private_key_pem TEXT NOT NULL,
+	public_key_pem TEXT NOT NULL,
+	created_at DATETIME NOT NULL,
+	UNIQUE(zone, view, key_type)
+);
+`
+	if _, err := db.main.Exec(schema); err != nil {
+		return fmt.Errorf("migrate dnssec_keys table: %w", err)
 	}
 	return nil
 }
