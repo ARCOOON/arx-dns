@@ -6,27 +6,39 @@ Vue 3 management console for arx-dns. Embedded into the Go binary at build time.
 
 - Vue 3 + TypeScript + Vite
 - Tailwind CSS v4
-- shadcn-vue (radix-vue primitives)
+- shadcn-vue (reka-ui primitives; legacy radix-vue components retained)
 - vue-sonner (toast notifications) + `useNotifications` composable (client-side history, max 50 entries)
 - chart.js + vue-chartjs (Dashboard live line charts)
 - OKLCH theme tokens (light/dark)
 - Noto Sans (headings) + Source Sans 3 (body) via Google Fonts
+- **pnpm** (`packageManager`: `pnpm@11.9.0`; requires Node.js 22+)
+- Global content-addressable store at `~/.local/share/pnpm/store` (configured in `ui/.npmrc` and `ui/pnpm-workspace.yaml`; never committed under `.pnpm-store/`)
+
+## Prerequisites
+
+- Node.js 22+ (pnpm 11 requirement)
+- pnpm 11 (`npm install -g pnpm@latest` after upgrading Node, or use Corepack: `corepack enable`)
 
 ## Commands
 
 ```bash
-npm install
-npm install vue-sonner   # toast notification center
-npm install chart.js vue-chartjs   # required for Dashboard live charts
-npm run dev      # http://127.0.0.1:5173
-npm run build    # outputs to dist/ (required before go build)
+pnpm install
+pnpm run dev      # http://127.0.0.1:5173
+pnpm run build    # outputs to dist/ (required before go build)
+```
+
+If a workspace-local `.pnpm-store/` appears (e.g. after a misconfigured install), remove it and reinstall:
+
+```bash
+rm -rf .pnpm-store node_modules
+pnpm install
 ```
 
 Route views are lazy-loaded via dynamic `import()` in `src/router/index.ts`, so Vite emits per-route chunks instead of one oversized bundle. `vite.config.ts` suppresses the upstream `@vueuse/core` `INVALID_ANNOTATION` Rolldown warning while keeping the default 500 kB chunk-size limit.
 
 ## Development API proxy
 
-`vite.config.ts` proxies `/api` to `http://127.0.0.1:8080` during `npm run dev`. Start the Go management API listener before using authenticated views.
+`vite.config.ts` proxies `/api` to `http://127.0.0.1:8080` during `pnpm run dev`. Start the Go management API listener before using authenticated views.
 
 ## Authentication
 
@@ -40,21 +52,22 @@ The API client (`src/api/client.ts`) reads `localStorage.getItem('arx_token')` a
 | `/zones`      | Zones & Records | Zone sidebar with **Add Zone** (domain + **public/internal** view), color-coded view badges, record table (name + muted FQDN), reactive **Add/Edit Record** dialog (type-specific fields for MX/SRV/SOA; BIND TTL text input; SOA serial read-only), **AlertDialog** confirmation for zone and record delete, record update via `PUT /api/v1/zones/{zone}/records/{id}`                                                                                      |
 | `/blocklists` | Blocklists      | Live `blocked_domains_count` stat card with async **Update Feeds** sync (`POST /api/v1/firewall/sync` returns `202`; UI polls `GET /api/v1/firewall/status` every 2.5 s for `sync_in_progress`, 120 s timeout); **Remote Feeds** tab (source table with description sub-text, enable toggle, Domains / Last Sync columns, **Add Feed** dialog); **Custom Rules** tab (manual domain table, **Add Domain** dialog, per-row delete; changes apply immediately) |
 | `/logs`       | Logs            | Terminal-style live log console with SSE stream, level filter, auto-scroll, and a **Settings** link to `/settings?tab=logging`                                                                                                                                                                                                                                                                                                                               |
-| `/audit`      | Audit Trail     | Management API mutation log (`GET /api/v1/audit`, up to 500 entries); refreshable table with timestamp, client IP, action, target, and details                                                                                                                                                                                                                                                                                                               |
+| `/audit`      | Audit Trail     | Management API mutation log (`GET /api/v1/audit`, up to 500 entries); human-readable action labels with tooltip technical details (method, path, status, success, record type); target column shows zone or resource context                                                                                                                                                                                                                                 |
 | `/settings`   | Settings        | Tabbed configuration UI: **DNS & System** (resolver mode, dynamic upstream resolver table with add/delete dialog, rate limits via `GET/PUT /api/v1/config`), **Security & ACL** (trusted subnets table + query ACL with allow/block actions and edit dialog), **Logging** (log level and rotation via config API), **UI Preferences** (toast notification position, browser-local only); persistent restart warning when `requires_restart` is returned      |
 | `/login`      | Login           | Bearer token entry (public route)                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## API modules
 
-| Module                | Purpose                                                                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `src/api/client.ts`   | Generic `fetch` wrapper with Bearer auth, zone list/record CRUD (including `PUT` record update), and zone create/delete helpers |
-| `src/api/stats.ts`    | `StatsSnapshot` / `StatsHistoryPoint` types, `fetchStats()`, and `getStatsHistory()`                                            |
-| `src/api/firewall.ts` | Blocklist source CRUD, custom domain CRUD, firewall status, and sync helpers                                                    |
-| `src/api/logs.ts`     | Log history, SSE stream helper, and legacy `GET/PUT /api/v1/logs/config` helpers                                                |
-| `src/api/settings.ts` | Query ACL rule CRUD including `PUT` update (`/api/v1/settings/acl`)                                                             |
-| `src/api/config.ts`   | Full server configuration `GET/PUT /api/v1/config`; `cloneAppConfig()` deep-clones reactive Vue state for safe PUT payloads     |
-| `src/api/audit.ts`    | Audit trail `GET /api/v1/audit`                                                                                                 |
+| Module                         | Purpose                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `src/api/client.ts`            | Generic `fetch` wrapper with Bearer auth, zone list/record CRUD (including `PUT` record update), and zone create/delete helpers |
+| `src/api/stats.ts`             | `StatsSnapshot` / `StatsHistoryPoint` types, `fetchStats()`, and `getStatsHistory()`                                            |
+| `src/api/firewall.ts`          | Blocklist source CRUD, custom domain CRUD, firewall status, and sync helpers                                                    |
+| `src/api/logs.ts`              | Log history, SSE stream helper, and legacy `GET/PUT /api/v1/logs/config` helpers                                                |
+| `src/api/settings.ts`          | Query ACL rule CRUD including `PUT` update (`/api/v1/settings/acl`)                                                             |
+| `src/api/config.ts`            | Full server configuration `GET/PUT /api/v1/config`; `cloneAppConfig()` deep-clones reactive Vue state for safe PUT payloads     |
+| `src/api/audit.ts`             | Audit trail `GET /api/v1/audit`                                                                                                 |
+| `src/utils/auditFormatting.ts` | Human-readable audit action labels and parsed technical detail rows for tooltips                                                |
 
 ## Notifications
 
@@ -64,8 +77,11 @@ The API client (`src/api/client.ts`) reads `localStorage.getItem('arx_token')` a
 
 ## Adding components
 
+`components.json` follows the current shadcn-vue schema (no `tsConfigPath` or `framework` keys).
+
 ```bash
-npx shadcn-vue@latest add card
+pnpm dlx shadcn-vue@latest add card
+pnpm dlx shadcn-vue@latest add tooltip
 ```
 
 Components are placed under `src/components/ui/`.

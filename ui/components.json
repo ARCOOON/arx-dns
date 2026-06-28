@@ -2,8 +2,6 @@
   "$schema": "https://radix.shadcn-vue.com/schema.json",
   "style": "new-york",
   "typescript": true,
-  "tsConfigPath": "./tsconfig.app.json",
-  "framework": "vite",
   "tailwind": {
     "config": "",
     "css": "src/style.css",

@@ -1,0 +1,4 @@
+minimumReleaseAge: 0
+storeDir: ~/.local/share/pnpm/store
+allowBuilds:
+  vue-demi: true

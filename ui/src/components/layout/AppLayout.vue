@@ -43,13 +43,17 @@ function isActive(path: string, exact: boolean): boolean {
       </div>
 
       <nav class="flex flex-1 flex-col gap-1 p-3">
-        <RouterLink v-for="item in navItems" :key="item.to" :to="item.to" :class="cn(
-          'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-          isActive(item.to, item.exact)
-            ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
-        )
-          ">
+        <RouterLink
+          v-for="item in navItems"
+          :key="item.to"
+          :to="item.to"
+          :class="cn(
+            'flex items-center gap-3 rounded-md border-l-4 px-3 py-2 text-sm transition-colors',
+            isActive(item.to, item.exact)
+              ? 'border-primary bg-primary/15 font-semibold text-foreground'
+              : 'border-transparent font-medium text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground',
+          )"
+        >
           <component :is="item.icon" class="size-4 shrink-0" aria-hidden="true" />
           {{ item.label }}
         </RouterLink>
