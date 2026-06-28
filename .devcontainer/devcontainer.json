@@ -1,10 +1,14 @@
 {
   "name": "arx-dns-development",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": ".."
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
   },
-  "service": "workspace",
   "workspaceFolder": "/workspaces/arx-dns",
   "remoteUser": "vscode",
   "containerUser": "vscode",
@@ -18,13 +22,18 @@
     "53:53/tcp"
   ],
   "forwardPorts": [
-    53
+    53,
+    5173
   ],
   "portsAttributes": {
     "53": {
       "label": "DNS (UDP/TCP)",
       "onAutoForward": "silent",
       "requireLocalPort": true
+    },
+    "5173": {
+      "label": "Vue dev server (Vite)",
+      "onAutoForward": "notify"
     }
   },
   "containerEnv": {
@@ -34,12 +43,13 @@
   "customizations": {
     "vscode": {
       "extensions": [
-        "golang.go",
+        "golang.Go",
+        "Vue.volar",
+        "bradlc.vscode-tailwindcss",
         "tamasfe.even-better-toml",
         "yzhang.markdown-all-in-one",
         "davidanson.vscode-markdownlint",
-        "bierner.markdown-mermaid",
-        "vue.volar"
+        "bierner.markdown-mermaid"
       ],
       "settings": {
         "go.useLanguageServer": true,
@@ -47,7 +57,7 @@
         "go.lintOnSave": "package",
         "editor.formatOnSave": true,
         "[go]": {
-          "editor.defaultFormatter": "golang.go"
+          "editor.defaultFormatter": "golang.Go"
         },
         "[markdown]": {
           "editor.wordWrap": "on"
@@ -55,5 +65,5 @@
       }
     }
   },
-  "postCreateCommand": "go version && dig -v | head -1"
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends bind9-dnsutils dnsutils && go version && node --version && npm --version"
 }
