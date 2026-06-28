@@ -55,5 +55,5 @@
       }
     }
   },
-  "postCreateCommand": "go env CGO_ENABLED GOOS GOARCH && dig -v | head -1"
+  "postCreateCommand": "go version && dig -v | head -1"
 }
