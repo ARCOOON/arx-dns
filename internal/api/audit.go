@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -61,13 +64,18 @@ func auditMiddleware(logger *slog.Logger, db *telemetry.DB) func(http.Handler) h
 				return
 			}
 
+			recordType := ""
+			if shouldInspectBody(r) {
+				recordType = extractRecordType(readAndRestoreBody(r))
+			}
+
 			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(rec, r)
 
 			success := rec.status >= http.StatusOK && rec.status < http.StatusBadRequest
 			action := auditAction(r)
 			target := auditTarget(r)
-			details := auditDetails(r, rec.status, success)
+			details := auditDetails(r, rec.status, success, recordType)
 
 			logger.Info("api audit",
 				"client_ip", clientIP(r),
@@ -132,6 +140,10 @@ func auditAction(r *http.Request) string {
 		return "update_config"
 	case r.Method == http.MethodPut && r.URL.Path == "/api/v1/logs/config":
 		return "update_log_config"
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/dnssec/enable"):
+		return "enable_dnssec"
+	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/dnssec/disable"):
+		return "disable_dnssec"
 	default:
 		return strings.ToLower(r.Method) + " " + r.URL.Path
 	}
@@ -149,8 +161,48 @@ func auditTarget(r *http.Request) string {
 	return ""
 }
 
-func auditDetails(r *http.Request, status int, success bool) string {
-	return fmt.Sprintf("method=%s path=%s status=%d success=%t", r.Method, r.URL.Path, status, success)
+func auditDetails(r *http.Request, status int, success bool, recordType string) string {
+	details := fmt.Sprintf("method=%s path=%s status=%d success=%t", r.Method, r.URL.Path, status, success)
+	recordType = strings.ToUpper(strings.TrimSpace(recordType))
+	if recordType != "" {
+		details += " type=" + recordType
+	}
+	return details
+}
+
+func shouldInspectBody(r *http.Request) bool {
+	if r == nil || r.Body == nil {
+		return false
+	}
+	switch r.Method {
+	case http.MethodPost, http.MethodPut:
+	default:
+		return false
+	}
+	return strings.Contains(r.URL.Path, "/records")
+}
+
+func readAndRestoreBody(r *http.Request) []byte {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil
+	}
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	return body
+}
+
+func extractRecordType(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+
+	var payload struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(payload.Type))
 }
 
 func clientIP(r *http.Request) string {
