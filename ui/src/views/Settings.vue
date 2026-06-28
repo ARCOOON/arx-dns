@@ -772,10 +772,10 @@ onMounted(() => {
                 <SelectContent>
                   <SelectItem
                     v-for="position in TOAST_POSITION_OPTIONS"
-                    :key="position"
-                    :value="position"
+                    :key="position.value"
+                    :value="position.value"
                   >
-                    {{ position }}
+                    {{ position.label }}
                   </SelectItem>
                 </SelectContent>
               </Select>

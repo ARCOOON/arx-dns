@@ -8,5 +8,11 @@ const toastPosition = useToastPosition()
 
 <template>
   <RouterView />
-  <Toaster :position="toastPosition" rich-colors close-button />
+  <Toaster
+    :position="toastPosition"
+    rich-colors
+    close-button
+    :duration="3000"
+    :offset="80"
+  />
 </template>

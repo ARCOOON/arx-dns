@@ -6,11 +6,11 @@ export type ToastPosition =
   | 'bottom-left'
   | 'top-left'
 
-export const TOAST_POSITION_OPTIONS: ToastPosition[] = [
-  'top-right',
-  'bottom-right',
-  'bottom-left',
-  'top-left',
+export const TOAST_POSITION_OPTIONS: { value: ToastPosition; label: string }[] = [
+  { value: 'top-right', label: 'Top Right' },
+  { value: 'bottom-right', label: 'Bottom Right' },
+  { value: 'bottom-left', label: 'Bottom Left' },
+  { value: 'top-left', label: 'Top Left' },
 ]
 
 export function useToastPosition() {

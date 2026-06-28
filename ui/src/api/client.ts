@@ -188,3 +188,43 @@ export function deleteZoneRecord(
     { method: 'DELETE' },
   )
 }
+
+export interface ZoneDNSSECStatus {
+  enabled: boolean
+  zone: string
+  view: 'public' | 'internal'
+  algorithm?: number
+  ksk_tag?: number
+  zsk_tag?: number
+  ds?: string
+}
+
+export function fetchZoneDNSSEC(
+  origin: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<ZoneDNSSECStatus> {
+  const params = new URLSearchParams({ view })
+  return apiRequest<ZoneDNSSECStatus>(
+    `/api/v1/zones/${zonePath(origin)}/dnssec?${params.toString()}`,
+  )
+}
+
+export function enableZoneDNSSEC(
+  origin: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<ZoneDNSSECStatus> {
+  return apiRequest<ZoneDNSSECStatus>(
+    `/api/v1/zones/${zonePath(origin)}/dnssec/enable`,
+    { method: 'POST', body: { view } },
+  )
+}
+
+export function disableZoneDNSSEC(
+  origin: string,
+  view: 'public' | 'internal' = 'public',
+): Promise<ZoneDNSSECStatus> {
+  return apiRequest<ZoneDNSSECStatus>(
+    `/api/v1/zones/${zonePath(origin)}/dnssec/disable`,
+    { method: 'POST', body: { view } },
+  )
+}

@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Loader2, Pencil, Plus, Trash2 } from 'lucide-vue-next'
+import { Loader2, Pencil, Plus, Shield, Trash2 } from 'lucide-vue-next'
 import { notify } from '@/composables/useNotifications'
 import {
   createZone,
   createZoneRecord,
   deleteZone,
   deleteZoneRecord,
+  disableZoneDNSSEC,
+  enableZoneDNSSEC,
+  fetchZoneDNSSEC,
   fetchZoneRecords,
   fetchZones,
   updateZoneRecord,
+  type ZoneDNSSECStatus,
   type ZoneInfo,
   type ZoneRecord,
 } from '@/api/client'
@@ -23,6 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -49,6 +54,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import ClipboardText from '@/components/ClipboardText.vue'
 import { cn } from '@/lib/utils'
 import {
   CAA_TAGS,
@@ -98,6 +105,14 @@ const newZoneName = ref('')
 const newZoneView = ref<ZoneView>('public')
 const editingRecordId = ref<string | null>(null)
 const recordPendingDelete = ref<ZoneRecord | null>(null)
+const dnssecDialogOpen = ref(false)
+const loadingDNSSEC = ref(false)
+const enablingDNSSEC = ref(false)
+const disablingDNSSEC = ref(false)
+const dnssecStatus = ref<ZoneDNSSECStatus | null>(null)
+const showDNSSECRecords = ref(false)
+
+const DNSSEC_RECORD_TYPES = new Set(['RRSIG', 'NSEC', 'DNSKEY'])
 
 const form = ref<RecordFormState>(createDefaultFormState())
 const recordFormErrors = ref<RecordFormErrors>({})
@@ -105,6 +120,12 @@ const recordFormErrors = ref<RecordFormErrors>({})
 const selectedOrigin = computed(() => selectedZone.value?.origin ?? '')
 const isEditingRecord = computed(() => editingRecordId.value !== null)
 const isSoaRecord = computed(() => form.value.type === 'SOA')
+const displayRecords = computed(() => {
+  if (showDNSSECRecords.value) {
+    return records.value
+  }
+  return records.value.filter((record) => !DNSSEC_RECORD_TYPES.has(record.type))
+})
 
 const fqdnPreview = computed(() => recordFqdn(form.value.name))
 
@@ -163,6 +184,30 @@ function setSelectString(
 
 function formatOrigin(origin: string): string {
   return stripTrailingDot(origin)
+}
+
+function recordTypeBadgeClass(type: string): string {
+  switch (type) {
+    case 'A':
+    case 'AAAA':
+      return 'border-transparent bg-sky-500/10 text-sky-700 dark:text-sky-400'
+    case 'CNAME':
+    case 'PTR':
+      return 'border-transparent bg-violet-500/10 text-violet-700 dark:text-violet-400'
+    case 'MX':
+    case 'TXT':
+      return 'border-transparent bg-amber-500/10 text-amber-700 dark:text-amber-400'
+    case 'SOA':
+    case 'NS':
+      return 'border-transparent bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+    case 'RRSIG':
+    case 'NSEC':
+    case 'DNSKEY':
+    case 'DS':
+      return 'border-transparent bg-muted text-muted-foreground'
+    default:
+      return 'border-transparent bg-secondary text-secondary-foreground'
+  }
 }
 
 function zoneKey(zone: ZoneInfo): string {
@@ -350,6 +395,74 @@ async function submitRecord(): Promise<void> {
   }
 }
 
+async function openDNSSECDialog(): Promise<void> {
+  if (!selectedZone.value) {
+    return
+  }
+  dnssecDialogOpen.value = true
+  await loadDNSSECStatus()
+}
+
+async function loadDNSSECStatus(): Promise<void> {
+  if (!selectedZone.value) {
+    dnssecStatus.value = null
+    return
+  }
+
+  loadingDNSSEC.value = true
+  try {
+    dnssecStatus.value = await fetchZoneDNSSEC(
+      selectedZone.value.origin,
+      selectedZone.value.view,
+    )
+  } catch (err) {
+    dnssecStatus.value = null
+    notify(parseApiError(err, 'Failed to load DNSSEC status'), 'error')
+  } finally {
+    loadingDNSSEC.value = false
+  }
+}
+
+async function enableDNSSEC(): Promise<void> {
+  if (!selectedZone.value) {
+    return
+  }
+
+  enablingDNSSEC.value = true
+  try {
+    dnssecStatus.value = await enableZoneDNSSEC(
+      selectedZone.value.origin,
+      selectedZone.value.view,
+    )
+    await Promise.all([loadZones(), loadRecords()])
+    notify('DNSSEC enabled and zone signed')
+  } catch (err) {
+    notify(parseApiError(err, 'Failed to enable DNSSEC'), 'error')
+  } finally {
+    enablingDNSSEC.value = false
+  }
+}
+
+async function disableDNSSEC(): Promise<void> {
+  if (!selectedZone.value) {
+    return
+  }
+
+  disablingDNSSEC.value = true
+  try {
+    dnssecStatus.value = await disableZoneDNSSEC(
+      selectedZone.value.origin,
+      selectedZone.value.view,
+    )
+    await Promise.all([loadZones(), loadRecords()])
+    notify('DNSSEC disabled and signing records removed')
+  } catch (err) {
+    notify(parseApiError(err, 'Failed to disable DNSSEC'), 'error')
+  } finally {
+    disablingDNSSEC.value = false
+  }
+}
+
 async function confirmDeleteRecord(): Promise<void> {
   if (!selectedZone.value || !recordPendingDelete.value) {
     return
@@ -409,6 +522,14 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          :disabled="!selectedZone || loadingDNSSEC"
+          @click="openDNSSECDialog"
+        >
+          <Shield class="size-4" />
+          DNSSEC
+        </Button>
         <Button variant="outline" :disabled="!selectedZone || deletingZone" @click="openDeleteZoneDialog">
           <Trash2 class="size-4 text-destructive" />
           Delete Zone
@@ -496,7 +617,17 @@ onMounted(async () => {
           <div v-else-if="records.length === 0" class="py-10 text-center text-sm text-muted-foreground">
             No records in this zone.
           </div>
-          <div v-else class="overflow-x-auto">
+          <div v-else class="space-y-3">
+            <div class="flex items-center gap-2">
+              <Switch id="show-dnssec-records" v-model:checked="showDNSSECRecords" />
+              <Label for="show-dnssec-records" class="text-sm font-normal">
+                Show DNSSEC records
+              </Label>
+            </div>
+            <div v-if="displayRecords.length === 0" class="py-10 text-center text-sm text-muted-foreground">
+              No user records to display. Enable "Show DNSSEC records" to view signing data.
+            </div>
+            <div v-else class="overflow-x-auto">
             <table class="w-full min-w-[640px] text-left text-sm">
               <thead>
                 <tr class="border-b border-border text-muted-foreground">
@@ -508,14 +639,18 @@ onMounted(async () => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="record in records" :key="record.id" class="border-b border-border/70 last:border-0">
+                <tr v-for="record in displayRecords" :key="record.id" class="border-b border-border/70 last:border-0">
                   <td class="px-3 py-2 font-mono text-xs">
                     {{ record.name }}
                     <span class="text-muted-foreground">
                       ({{ recordFqdn(record.name) }})
                     </span>
                   </td>
-                  <td class="px-3 py-2">{{ record.type }}</td>
+                  <td class="px-3 py-2">
+                    <Badge :class="recordTypeBadgeClass(record.type)">
+                      {{ record.type }}
+                    </Badge>
+                  </td>
                   <td class="px-3 py-2">{{ record.ttl }}</td>
                   <td class="max-w-md truncate px-3 py-2 font-mono text-xs" :title="record.value">
                     {{ record.value }}
@@ -542,6 +677,7 @@ onMounted(async () => {
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1303,6 +1439,77 @@ onMounted(async () => {
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="dnssecDialogOpen">
+      <DialogContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>DNSSEC</DialogTitle>
+          <DialogDescription>
+            Auto-DNSSEC signs authoritative zones with ECDSAP256SHA256 (algorithm 13),
+            generates NSEC denial chains, and produces a DS record for your registrar.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div v-if="loadingDNSSEC" class="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 class="size-4 animate-spin" />
+          Loading DNSSEC status...
+        </div>
+
+        <div v-else class="space-y-4">
+          <div class="rounded-md border border-border p-3 text-sm">
+            <p class="font-medium">
+              Status:
+              <span
+                :class="dnssecStatus?.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'"
+              >
+                {{ dnssecStatus?.enabled ? 'Enabled' : 'Disabled' }}
+              </span>
+            </p>
+            <p v-if="dnssecStatus?.enabled && dnssecStatus.ksk_tag" class="mt-1 text-xs text-muted-foreground">
+              KSK tag {{ dnssecStatus.ksk_tag }} · ZSK tag {{ dnssecStatus.zsk_tag }} · Algorithm
+              {{ dnssecStatus.algorithm }}
+            </p>
+          </div>
+
+          <div v-if="dnssecStatus?.enabled && dnssecStatus.ds" class="space-y-2">
+            <Label>DS record (add at your TLD registrar)</Label>
+            <ClipboardText :value="dnssecStatus.ds" label="Copy DS record" />
+          </div>
+
+          <p v-else class="text-sm text-muted-foreground">
+            Enable Auto-DNSSEC to generate KSK/ZSK keys, sign all RRsets, and produce a DS record
+            for delegation at the parent zone.
+          </p>
+        </div>
+
+        <DialogFooter class="gap-2 sm:justify-between">
+          <Button
+            v-if="dnssecStatus?.enabled"
+            type="button"
+            variant="destructive"
+            :disabled="disablingDNSSEC || loadingDNSSEC || !selectedZone"
+            @click="disableDNSSEC"
+          >
+            <Loader2 v-if="disablingDNSSEC" class="size-4 animate-spin" />
+            Disable DNSSEC
+          </Button>
+          <div class="flex gap-2 sm:ml-auto">
+          <Button type="button" variant="outline" @click="dnssecDialogOpen = false">
+            Close
+          </Button>
+          <Button
+            v-if="!dnssecStatus?.enabled"
+            type="button"
+            :disabled="enablingDNSSEC || loadingDNSSEC || !selectedZone"
+            @click="enableDNSSEC"
+          >
+            <Loader2 v-if="enablingDNSSEC" class="size-4 animate-spin" />
+            Enable DNSSEC
+          </Button>
+          </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </div>

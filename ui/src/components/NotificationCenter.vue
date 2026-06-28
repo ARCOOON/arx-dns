@@ -50,7 +50,7 @@ function typeClass(type: NotificationType): string {
 </script>
 
 <template>
-  <div :class="cn('pointer-events-none fixed z-50', fabPositionClass)">
+  <div :class="cn('pointer-events-none fixed z-[100]', fabPositionClass)">
     <Popover>
       <PopoverTrigger as-child>
         <Button
