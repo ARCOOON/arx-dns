@@ -31,6 +31,7 @@ type Memory struct {
 	internal atomic.Value // holds *radix.Tree
 	registry *zoneRegistry
 	ttlHints *ttlHintStore
+	dnssec   *DNSSECManager
 	mutateMu sync.Mutex
 }
 

@@ -127,11 +127,7 @@ func (m *Memory) DeleteZoneRecordByID(zonesDir, origin string, view ZoneView, id
 		m.SwapPublicTree(tree)
 	}
 
-	path, err := m.zoneFilePath(zonesDir, origin, view)
-	if err != nil {
-		return err
-	}
-	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
+	if err := m.persistZoneFile(zonesDir, origin, view, tree); err != nil {
 		return fmt.Errorf("persist zone file: %w", err)
 	}
 
@@ -220,11 +216,7 @@ func (m *Memory) UpdateZoneRecordByID(zonesDir, origin string, view ZoneView, id
 		m.SwapPublicTree(tree)
 	}
 
-	path, err := m.zoneFilePath(zonesDir, origin, view)
-	if err != nil {
-		return nil, err
-	}
-	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
+	if err := m.persistZoneFile(zonesDir, origin, view, tree); err != nil {
 		return nil, fmt.Errorf("persist zone file: %w", err)
 	}
 

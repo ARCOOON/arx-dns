@@ -90,11 +90,7 @@ func (m *Memory) AddZoneRecord(zonesDir, origin string, view ZoneView, in Record
 		m.SwapPublicTree(tree)
 	}
 
-	path, err := m.zoneFilePath(zonesDir, origin, view)
-	if err != nil {
-		return nil, err
-	}
-	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
+	if err := m.persistZoneFile(zonesDir, origin, view, tree); err != nil {
 		return nil, fmt.Errorf("persist zone file: %w", err)
 	}
 
@@ -144,11 +140,7 @@ func (m *Memory) DeleteZoneRecord(zonesDir, origin string, view ZoneView, in Rec
 		m.SwapPublicTree(tree)
 	}
 
-	path, err := m.zoneFilePath(zonesDir, origin, view)
-	if err != nil {
-		return err
-	}
-	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
+	if err := m.persistZoneFile(zonesDir, origin, view, tree); err != nil {
 		return fmt.Errorf("persist zone file: %w", err)
 	}
 
@@ -228,8 +220,18 @@ func WriteZoneFile(path, origin string, tree *radix.Tree, ttlHints map[string]st
 	}
 
 	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, []byte(b.String()), 0o644); err != nil {
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open zone temp file: %w", err)
+	}
+	if _, err := f.WriteString(b.String()); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write zone temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close zone temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
@@ -334,11 +336,7 @@ func (m *Memory) ApplyDynamicUpdate(zonesDir, origin string, view ZoneView, appl
 		m.SwapPublicTree(tree)
 	}
 
-	path, err := m.zoneFilePath(zonesDir, origin, view)
-	if err != nil {
-		return err
-	}
-	if err := WriteZoneFile(path, origin, tree, m.ttlHints.snapshot(origin, view)); err != nil {
+	if err := m.persistZoneFile(zonesDir, origin, view, tree); err != nil {
 		return fmt.Errorf("persist zone file: %w", err)
 	}
 	return nil
