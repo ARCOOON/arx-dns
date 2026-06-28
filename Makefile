@@ -10,7 +10,8 @@ LDFLAGS         := -trimpath -ldflags="-s -w"
 GOOS_GOARCH_PAIRS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64
 
 UI_SRC := $(shell find ui/src ui/public -type f 2>/dev/null) \
-	ui/index.html ui/vite.config.ts ui/package.json ui/package-lock.json \
+	ui/index.html ui/vite.config.ts ui/package.json ui/pnpm-lock.yaml \
+	ui/pnpm-workspace.yaml ui/.npmrc \
 	ui/tsconfig.json ui/tsconfig.app.json ui/tsconfig.node.json ui/components.json
 
 ##@ General
@@ -23,8 +24,8 @@ clean: ## Remove bin/, ui/dist/, ui/node_modules/, and local binaries
 
 ##@ WebUI
 
-ui/dist/index.html: $(UI_SRC) ## Build production WebUI assets (npm ci && npm run build)
-	cd ui && npm ci && npm run build
+ui/dist/index.html: $(UI_SRC) ## Build production WebUI assets (pnpm install && pnpm run build)
+	cd ui && pnpm install --frozen-lockfile && pnpm run build
 
 ui/dist: ui/dist/index.html
 
