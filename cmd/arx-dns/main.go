@@ -14,6 +14,7 @@ import (
 	"github.com/ARCOOON/arx-dns/internal/api"
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
+	"github.com/ARCOOON/arx-dns/internal/dnssec"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/logger"
 	"github.com/ARCOOON/arx-dns/internal/network"
@@ -69,6 +70,8 @@ func main() {
 
 	// Step 2: Load zones and blocklists.
 	store := storage.NewMemory()
+	dnssecStore := dnssec.NewStore(telemetryDB.Main())
+	store.SetDNSSECManager(storage.NewDNSSECManager(dnssecStore))
 	storage.LoadZones(cfg.Zones, store, logger)
 
 	fwAction, err := firewall.ParseBlockAction(cfg.Firewall.BlockAction)
