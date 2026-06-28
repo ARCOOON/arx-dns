@@ -6,7 +6,7 @@
       "version": "latest"
     },
     "ghcr.io/devcontainers/features/node:1": {
-      "version": "20"
+      "version": "22"
     }
   },
   "workspaceFolder": "/workspaces/arx-dns",
@@ -65,5 +65,5 @@
       }
     }
   },
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends bind9-dnsutils dnsutils && go version && node --version && npm --version"
+  "postCreateCommand": "sudo npm install -g npm@latest pnpm@latest && sudo apt-get update && sudo apt-get install -y --no-install-recommends bind9-dnsutils dnsutils && go version && node --version && npm --version && pnpm --version"
 }
