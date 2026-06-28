@@ -12,6 +12,8 @@ config.toml
 
 # Frontend
 ui/node_modules/
+.pnpm-store/
+/.npmrc
 
 # Phase working notes (not versioned)
 /phases/

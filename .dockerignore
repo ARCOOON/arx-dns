@@ -1,5 +1,6 @@
 .git
 .gitignore
+.pnpm-store/
 .devcontainer
 phases
 arx-dns
