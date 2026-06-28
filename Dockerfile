@@ -12,12 +12,15 @@ COPY . .
 ARG TARGETOS=linux
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && cd ui && npm ci && npm run build \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && corepack enable \
+    && cd ui && pnpm install --frozen-lockfile && pnpm run build \
     && cd .. \
     && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -tags webui -o /out/arx-dns ./cmd/arx-dns/ \
-    && apt-get purge -y nodejs npm && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+    && apt-get purge -y curl nodejs && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /runtime/etc/arx-dns/zones /runtime/etc/arx-dns/blocklists
 
