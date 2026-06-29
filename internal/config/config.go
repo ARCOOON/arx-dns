@@ -32,6 +32,8 @@ type Config struct {
 	Logging   LoggingConfig   `toml:"logging" json:"logging"`
 	Update    UpdateConfig    `toml:"update" json:"update"`
 	XFR       XFRConfig       `toml:"xfr" json:"xfr"`
+	ACL       ACLConfig       `toml:"acl" json:"acl"`
+	Views     ViewsConfig     `toml:"views" json:"views"`
 }
 
 // LoggingConfig controls structured log file rotation parameters.
@@ -407,6 +409,9 @@ func (c Config) Validate() error {
 	if err := c.validateXFR(); err != nil {
 		return err
 	}
+	if err := c.validateACL(); err != nil {
+		return err
+	}
 	if err := c.validateLogging(); err != nil {
 		return err
 	}
@@ -523,6 +528,14 @@ func MergeWithCurrent(current, incoming Config) Config {
 
 	if !out.XFR.Enabled && len(out.XFR.AllowedSubnets) == 0 && len(out.XFR.NotifySlaves) == 0 {
 		out.XFR = current.XFR
+	}
+
+	if out.ACL.Lists == nil && len(out.ACL.AllowQuery) == 0 && len(out.ACL.AllowRecursion) == 0 &&
+		len(out.ACL.AllowTransfer) == 0 && len(out.ACL.Zones) == 0 {
+		out.ACL = current.ACL
+	}
+	if out.Views.Default == "" && len(out.Views.Entries) == 0 {
+		out.Views = current.Views
 	}
 
 	return out

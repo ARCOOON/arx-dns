@@ -61,6 +61,25 @@ enabled = false
 allowed_subnets = []
 notify_slaves = []
 
+[acl]
+allow_query = ['any']
+allow_recursion = ['trusted-lan']
+allow_transfer = ['none']
+
+[acl.lists]
+trusted-lan = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
+
+[views]
+default = 'public'
+
+[[views.entries]]
+name = 'internal'
+match_clients = ['trusted-lan']
+
+[[views.entries]]
+name = 'public'
+match_clients = ['any']
+
 [tls]
 cert_file = ''
 key_file = ''
