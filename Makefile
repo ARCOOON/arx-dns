@@ -11,7 +11,7 @@ GOOS_GOARCH_PAIRS := linux/amd64 linux/arm64 windows/amd64 darwin/amd64
 
 UI_SRC := $(shell find ui/src ui/public -type f 2>/dev/null) \
 	ui/index.html ui/vite.config.ts ui/package.json ui/pnpm-lock.yaml \
-	ui/pnpm-workspace.yaml ui/.npmrc \
+	ui/pnpm-workspace.yaml \
 	ui/tsconfig.json ui/tsconfig.app.json ui/tsconfig.node.json ui/components.json
 
 ##@ General
