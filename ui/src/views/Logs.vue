@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useStorage } from '@vueuse/core'
 import { RouterLink } from 'vue-router'
 import { Loader2, Settings, Trash2 } from 'lucide-vue-next'
 import { notify } from '@/composables/useNotifications'
@@ -27,7 +28,12 @@ const lines = ref<ParsedLogLine[]>([])
 const loading = ref(true)
 const levelFilter = ref<LogLevelFilter>('ALL')
 const autoScroll = ref(true)
+const wordWrap = useStorage('logs-word-wrap', false)
 const terminalRef = ref<HTMLElement | null>(null)
+
+const lineWhitespaceClass = computed(() =>
+  wordWrap.value ? 'whitespace-pre-wrap break-all' : 'whitespace-pre',
+)
 
 let eventSource: EventSource | null = null
 
@@ -106,6 +112,9 @@ onMounted(async () => {
     notify(parseApiError(err, 'Failed to load logs'), 'error')
   } finally {
     loading.value = false
+    if (autoScroll.value) {
+      await scrollToBottom()
+    }
   }
 })
 
@@ -151,6 +160,11 @@ onBeforeUnmount(() => {
         <Label for="auto-scroll" class="text-sm">Auto-scroll</Label>
       </div>
 
+      <div class="flex items-center gap-2">
+        <Switch id="word-wrap" v-model:checked="wordWrap" />
+        <Label for="word-wrap" class="text-sm">Word Wrap</Label>
+      </div>
+
       <div class="ml-auto flex items-center gap-2">
         <Button variant="outline" size="sm" @click="clearView">
           <Trash2 class="mr-2 size-4" aria-hidden="true" />
@@ -173,7 +187,7 @@ onBeforeUnmount(() => {
         Loading log history...
       </div>
       <template v-else>
-        <div v-for="(line, index) in lines" :key="`${line.time}-${index}`" class="whitespace-pre-wrap break-all">
+        <div v-for="(line, index) in lines" :key="`${line.time}-${index}`" :class="lineWhitespaceClass">
           <span v-if="line.time" class="text-zinc-500">[{{ line.time }}] </span>
           <span :class="levelClass(line.level)">[{{ line.level }}]</span>
           <span class="text-zinc-300"> {{ line.message }}</span>
