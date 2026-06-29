@@ -40,6 +40,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := dnssec.InitAnchors(); err != nil {
+		slog.Default().Error("failed to initialize DNSSEC root anchors", "error", err)
+		os.Exit(1)
+	}
+
 	telemetryDB, err := telemetry.OpenDB("./data")
 	if err != nil {
 		slog.Default().Error("failed to open telemetry databases", "error", err)
@@ -168,7 +173,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, queryACL, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, logger)
+	policyEngine, err := cfg.BuildPolicyEngine()
+	if err != nil {
+		logger.Error("invalid acl/views configuration", "error", err)
+		os.Exit(1)
+	}
+
+	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, queryACL, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, policyEngine, logger)
 
 	if err := firewall.StartWatcher(ctx, cfg.Firewall, telemetryDB.Main(), fw, logger); err != nil {
 		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
