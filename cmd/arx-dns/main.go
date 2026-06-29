@@ -69,6 +69,7 @@ func main() {
 		log.Warn("failed to sync logging config from config.toml", "error", err)
 	}
 	logger := log
+	logger.Info("configuration loaded successfully", cfg.StartupSummaryAttrs(*configPath)...)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -215,30 +216,10 @@ func main() {
 	}
 
 	logger.Info("starting arx-dns",
-		"config", *configPath,
-		"log_level", cfg.Server.LogLevel,
 		"address", cfg.ListenAddress(),
 		"api", cfg.API.Listen,
-		"event_loops", cfg.Server.EventLoops,
-		"zones", cfg.Zones.Directory,
-		"upstreams", cfg.Recursive.Upstreams,
 		"resolver_mode", cfg.ResolverMode(),
-		"root_hints_file", cfg.Resolver.RootHintsFile,
-		"auto_update_root_hints", cfg.Resolver.AutoUpdateRootHints,
 		"root_hints_count", len(rootHints),
-		"trusted_subnets", cfg.Recursive.TrustedSubnets,
-		"blocklists", cfg.Firewall.BlocklistsDirectory,
-		"block_action", fwAction,
-		"encrypted_dns", cfg.EncryptedDNSEnabled(),
-		"dnssec_validation", cfg.Security.DNSSECValidation,
-		"dns_cookies_enabled", cfg.Security.DNSCookiesEnabled,
-		"rate_limit_enabled", cfg.RateLimit.Enabled,
-		"rate_limit_rps", cfg.RateLimit.RequestsPerSecond,
-		"rate_limit_burst", cfg.RateLimit.Burst,
-		"dynamic_update_keys", len(cfg.Update.Keys),
-		"xfr_enabled", cfg.XFR.Enabled,
-		"xfr_allowed_subnets", cfg.XFR.AllowedSubnets,
-		"notify_slaves", cfg.XFR.NotifySlaves,
 	)
 	runtimeApplier := &runtime.Applier{
 		Processor:  proc,
