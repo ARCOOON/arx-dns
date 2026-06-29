@@ -68,7 +68,7 @@ func newWithConfig(cfg Config) (*slog.Logger, error) {
 		MaxAge:     cfg.Rotation.MaxAgeDays,
 	}
 
-	handlerOpts := &slog.HandlerOptions{Level: &Level}
+	handlerOpts := HandlerOptions(&Level)
 	streamWriter := NewStreamWriter(ring, broadcaster)
 	handler := NewMultiHandler(
 		NewConsoleHandler(os.Stdout, handlerOpts),

@@ -50,7 +50,7 @@ func (h *ConsoleHandler) Enabled(_ context.Context, level slog.Level) bool {
 func (h *ConsoleHandler) Handle(_ context.Context, r slog.Record) error {
 	buf := make([]byte, 0, 256)
 	buf = append(buf, '[')
-	buf = r.Time.AppendFormat(buf, "2006-01-02T15:04:05.000Z07:00")
+	buf = append(buf, FormatTimestamp(r.Time)...)
 	buf = append(buf, "] ["...)
 	buf = append(buf, levelColor(r.Level)...)
 	buf = append(buf, r.Level.String()...)
