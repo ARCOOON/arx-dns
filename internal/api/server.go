@@ -97,6 +97,8 @@ func New(cfg config.Config, configPath string, stats *telemetry.Stats, telemetry
 	mux.Handle("PUT /api/v1/logs/config", auth(http.HandlerFunc(s.handleLogsConfigPut)))
 	mux.Handle("GET /api/v1/config", auth(http.HandlerFunc(s.handleConfigGet)))
 	mux.Handle("PUT /api/v1/config", auth(http.HandlerFunc(s.handleConfigPut)))
+	mux.Handle("GET /api/v1/config/acl", auth(http.HandlerFunc(s.handleACLConfigGet)))
+	mux.Handle("PUT /api/v1/config/acl", auth(http.HandlerFunc(s.handleACLConfigPut)))
 	mux.Handle("GET /api/v1/audit", auth(http.HandlerFunc(s.handleAuditList)))
 
 	mux.HandleFunc("GET /{$}", handleWebUI)
