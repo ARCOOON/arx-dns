@@ -12,8 +12,8 @@ import (
 // embeddedRootAnchors holds the IANA DNSSEC root trust anchor DNSKEY records.
 // Sources: IANA Root Zone KSK 20326 and KSK 38696 (RSA/SHA-256, algorithm 8).
 const embeddedRootAnchors = `
-. 3600 IN DNSKEY 257 3 8 AwEAAaz/tAm8yTn4Mfeh5eyI96WSVexTBAvkMgJzkKTOiW1vkIbzxeF3+/4RQDUxBdp3rR6C3eQegQJyNHCIX8nrLYFY7l120EXGvBYz18MUYpYSMqC0ijNUqZ0Lj1h9htSzwkKxbVZV0dy4OHfLm6YM9hObysgGpfqssGOoo+FLfW02G2vN45jmLEwQ=
-. 3600 IN DNSKEY 257 3 8 AwEAAcHDEz45tLKYRSbdeNeRjRr70AAeMhhDRMX0xBFk98hHNbSEIG8O9XGSUYC1ymUxyLxgNkzZRueekGV1IFKTZTmO5I/K8XlOR7xXR71MZobJw/PGzbeMgjQ4RsogHAgMX5/Al1LK6o6MymoTZCaf2donCldicYIN3J7EZEpkV0E=
+. 3600 IN DNSKEY 257 3 8 AwEAAaz/tAm8yTn4Mfeh5eyI96WSVexTBAvkMgJzkKTOiW1vkIbzxeF3+/4RgWOq7HrxRixHlFlExOLAJr5emLvN7SWXgnLh4+B5xQlNVz8Og8kvArMtNROxVQuCaSnIDdD5LKyWbRd2n9WGe2R8PzgCmr3EgVLrjyBxWezF0jLHwVN8efS3rCj/EWgvIWgb9tarpVUDK/b58Da+sqqls3eNbuv7pr+eoZG+SrDK6nWeL3c6H5Apxz7LjVc1uTIdsIXxuOLYA4/ilBmSVIzuDWfdRUfhHdY6+cn8HFRm+2hM8AnXGXws9555KrUB5qihylGa8subX2Nn6UwNR1AkUTV74bU=
+. 3600 IN DNSKEY 257 3 8 AwEAAa96jeuknZlaeSrvyAJj6ZHv28hhOKkx3rLGXVaC6rXTsDc449/cidltpkyGwCJNnOAlFNKF2jBosZBU5eeHspaQWOmOElZsjICMQMC3aeHbGiShvZsx4wMYSjH8e7Vrhbu6irwCzVBApESjbUdpWWmEnhathWu1jo+siFUiRAAxm9qyJNg/wOZqqzL/dL/q8PkcRU5oUKEpUge71M3ej2/7CPqpdVwuMoTvoB+ZOT4YeGyxMvHmbrxlFzGOHOijtzN+u1TQNatX2XBuzZNQ1K+s2CXkPIZo7s6JgZyvaBevYtxPvYLw4z9mR7K2vaF18UYH9Z9GNUUeayffKC73PYc=
 `
 
 var (
@@ -46,6 +46,17 @@ func SetRootAnchorsForTest(keys []mdns.RR) {
 	rootKeys = make([]mdns.RR, len(keys))
 	copy(rootKeys, keys)
 	anchorErr = nil
+}
+
+// RestoreEmbeddedAnchorsForTest reloads the embedded IANA root KSK anchors after test overrides.
+func RestoreEmbeddedAnchorsForTest() error {
+	keys, err := parseAnchorRecords(embeddedRootAnchors)
+	if err != nil {
+		return err
+	}
+	rootKeys = keys
+	anchorErr = nil
+	return nil
 }
 
 func parseAnchorRecords(text string) ([]mdns.RR, error) {

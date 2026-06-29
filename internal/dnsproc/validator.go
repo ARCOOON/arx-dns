@@ -135,13 +135,13 @@ func Validate(rrset []mdns.RR, sigs []mdns.RR, keys []mdns.RR) error {
 
 func (v *DNSSECValidator) establishTrust(signerZone string) ([]mdns.RR, error) {
 	signerZone = mdns.CanonicalName(signerZone)
-	if signerZone == "." {
-		return dnssec.RootAnchors(), nil
-	}
 
-	parentKeys := dnssec.RootAnchors()
-	if len(parentKeys) == 0 {
-		return nil, fmt.Errorf("%w: root anchors are not initialized", ErrDNSSECValidationFailed)
+	parentKeys, err := v.validateRootZone()
+	if err != nil {
+		return nil, err
+	}
+	if signerZone == "." {
+		return parentKeys, nil
 	}
 
 	for _, zone := range zoneCutPath(signerZone) {
@@ -154,20 +154,34 @@ func (v *DNSSECValidator) establishTrust(signerZone string) ([]mdns.RR, error) {
 	return parentKeys, nil
 }
 
+// validateRootZone fetches the live root DNSKEY RRset, verifies its RRSIG with the
+// zone ZSK, confirms embedded KSK trust anchors are present, and returns the full RRset.
+func (v *DNSSECValidator) validateRootZone() ([]mdns.RR, error) {
+	anchors := dnssec.RootAnchors()
+	if len(anchors) == 0 {
+		return nil, fmt.Errorf("%w: root anchors are not initialized", ErrDNSSECValidationFailed)
+	}
+
+	dnskeys, dnskeySigs, err := v.fetchSignedRRSet(".", mdns.TypeDNSKEY)
+	if err != nil {
+		return nil, fmt.Errorf("%w: root dnskey lookup: %v", ErrDNSSECValidationFailed, err)
+	}
+	if len(dnskeys) == 0 {
+		return nil, fmt.Errorf("%w: no root dnskey records", ErrDNSSECValidationFailed)
+	}
+	if err := Validate(dnskeys, dnskeySigs, dnskeys); err != nil {
+		return nil, fmt.Errorf("%w: root dnskey signature: %v", ErrDNSSECValidationFailed, err)
+	}
+	if !anchorsPresentInDNSKEYs(anchors, dnskeys) {
+		return nil, fmt.Errorf("%w: root dnskey set does not contain trust anchor", ErrDNSSECValidationFailed)
+	}
+	return dnskeys, nil
+}
+
 func (v *DNSSECValidator) validateZoneDelegation(zone string, parentKeys []mdns.RR) ([]mdns.RR, error) {
 	zone = mdns.CanonicalName(zone)
 
-	dnskeys, dnskeySigs, err := v.fetchSignedRRSet(zone, mdns.TypeDNSKEY)
-	if err != nil {
-		return nil, fmt.Errorf("%w: dnskey lookup %s: %v", ErrDNSSECValidationFailed, zone, err)
-	}
-	if len(dnskeys) == 0 {
-		return nil, fmt.Errorf("%w: no dnskey records for zone %s", ErrDNSSECValidationFailed, zone)
-	}
-	if err := Validate(dnskeys, dnskeySigs, dnskeys); err != nil {
-		return nil, fmt.Errorf("%w: dnskey self-signature for %s: %v", ErrDNSSECValidationFailed, zone, err)
-	}
-
+	// Step 1: verify the DS RRset using the parent's validated DNSKEY RRset (ZSK signs DS).
 	dsRecords, dsSigs, err := v.fetchSignedRRSet(zone, mdns.TypeDS)
 	if err != nil {
 		return nil, fmt.Errorf("%w: ds lookup %s: %v", ErrDNSSECValidationFailed, zone, err)
@@ -178,6 +192,20 @@ func (v *DNSSECValidator) validateZoneDelegation(zone string, parentKeys []mdns.
 	if err := Validate(dsRecords, dsSigs, parentKeys); err != nil {
 		return nil, fmt.Errorf("%w: ds signature for %s: %v", ErrDNSSECValidationFailed, zone, err)
 	}
+
+	// Step 2: fetch child DNSKEY RRset and verify its RRSIG (ZSK signs DNSKEY).
+	dnskeys, dnskeySigs, err := v.fetchSignedRRSet(zone, mdns.TypeDNSKEY)
+	if err != nil {
+		return nil, fmt.Errorf("%w: dnskey lookup %s: %v", ErrDNSSECValidationFailed, zone, err)
+	}
+	if len(dnskeys) == 0 {
+		return nil, fmt.Errorf("%w: no dnskey records for zone %s", ErrDNSSECValidationFailed, zone)
+	}
+	if err := Validate(dnskeys, dnskeySigs, dnskeys); err != nil {
+		return nil, fmt.Errorf("%w: dnskey signature for %s: %v", ErrDNSSECValidationFailed, zone, err)
+	}
+
+	// Step 3: confirm DS digest matches a KSK in the validated DNSKEY RRset.
 	if !dsMatchesKSK(dsRecords, dnskeys) {
 		return nil, fmt.Errorf("%w: ds digest mismatch for zone %s", ErrDNSSECValidationFailed, zone)
 	}
@@ -217,6 +245,29 @@ func (v *DNSSECValidator) fetchSignedRRSet(name string, qtype uint16) (rrset []m
 		}
 	}
 	return rrset, sigs, nil
+}
+
+func anchorsPresentInDNSKEYs(anchors, dnskeys []mdns.RR) bool {
+	for _, anchorRR := range anchors {
+		anchor, ok := anchorRR.(*mdns.DNSKEY)
+		if !ok {
+			continue
+		}
+		for _, keyRR := range dnskeys {
+			key, ok := keyRR.(*mdns.DNSKEY)
+			if !ok {
+				continue
+			}
+			if anchor.KeyTag() == key.KeyTag() &&
+				anchor.Algorithm == key.Algorithm &&
+				anchor.Flags == key.Flags &&
+				anchor.Protocol == key.Protocol &&
+				strings.EqualFold(anchor.PublicKey, key.PublicKey) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func dsMatchesKSK(dsRecords []mdns.RR, dnskeys []mdns.RR) bool {
