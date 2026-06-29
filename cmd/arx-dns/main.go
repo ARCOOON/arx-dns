@@ -69,7 +69,7 @@ func main() {
 		log.Warn("failed to sync logging config from config.toml", "error", err)
 	}
 	logger := log
-	logger.Info("configuration loaded successfully", cfg.StartupSummaryAttrs(*configPath)...)
+	logger.Info(cfg.FormatStartupSummary(*configPath))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
