@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/ARCOOON/arx-dns/internal/acl"
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
@@ -15,15 +16,16 @@ import (
 
 // Applier applies non-critical configuration changes at runtime without restarting listeners.
 type Applier struct {
-	Processor  *dnsproc.Processor
-	Forwarder  *dnsproc.Forwarder
-	RateLimit  *network.RateLimiter
-	TrustedACL *network.ACL
-	XFRACL     *network.ACL
-	Firewall   *firewall.Engine
-	Store      *storage.Memory
-	Telemetry  *telemetry.DB
-	Logger     *slog.Logger
+	Processor    *dnsproc.Processor
+	Forwarder    *dnsproc.Forwarder
+	RateLimit    *network.RateLimiter
+	TrustedACL   *network.ACL
+	XFRACL       *network.ACL
+	PolicyEngine *acl.Engine
+	Firewall     *firewall.Engine
+	Store        *storage.Memory
+	Telemetry    *telemetry.DB
+	Logger       *slog.Logger
 }
 
 // Apply updates hot-reloadable services from cfg.
@@ -65,8 +67,14 @@ func (a *Applier) Apply(cfg config.Config) error {
 	}
 	a.XFRACL = xfrACL
 
+	policyEngine, err := cfg.BuildPolicyEngine()
+	if err != nil {
+		return fmt.Errorf("parse acl/views: %w", err)
+	}
+	a.PolicyEngine = policyEngine
+
 	if a.Processor != nil {
-		a.Processor.ApplyRuntimeConfig(cfg, trustedACL, xfrACL)
+		a.Processor.ApplyRuntimeConfig(cfg, trustedACL, xfrACL, policyEngine)
 	}
 
 	if cfg.ResolverMode() == "forward" && a.Forwarder != nil {
@@ -75,6 +83,9 @@ func (a *Applier) Apply(cfg config.Config) error {
 		}
 		a.Forwarder.SetDNSSECValidation(cfg.Security.DNSSECValidation)
 		a.Forwarder.SetECS(cfg.ECS.Enabled, uint8(cfg.ECS.IPv4PrefixLength), uint8(cfg.ECS.IPv6PrefixLength))
+	}
+	if cfg.ResolverMode() == "iterative" && a.Processor != nil && a.Processor.IterativeResolver() != nil {
+		a.Processor.IterativeResolver().SetDNSSECValidation(cfg.Security.DNSSECValidation)
 	}
 
 	if a.Firewall != nil && a.Telemetry != nil {
