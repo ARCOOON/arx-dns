@@ -9,9 +9,9 @@
       "version": "22"
     },
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
-			"version": "20.10",
-			"moby": "true"
-		}
+      "version": "latest",
+      "moby": "false"
+    }
   },
   "workspaceFolder": "/workspaces/arx-dns",
   "remoteUser": "vscode",
