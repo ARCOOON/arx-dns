@@ -812,6 +812,34 @@ func (c Config) ListenAddress() string {
 	return net.JoinHostPort(c.Server.Listen, strconv.Itoa(c.Server.Port))
 }
 
+// StartupSummaryAttrs returns structured slog key-value pairs with high-level
+// configuration metrics for startup logging without dumping the full Config struct.
+func (c Config) StartupSummaryAttrs(configPath string) []any {
+	return []any{
+		"config", configPath,
+		"log_level", c.Server.LogLevel,
+		"address", c.ListenAddress(),
+		"api", c.API.Listen,
+		"event_loops", c.Server.EventLoops,
+		"resolver_mode", c.ResolverMode(),
+		"upstreams", len(c.Recursive.Upstreams),
+		"zones", c.Zones.Directory,
+		"blocklists", c.Firewall.BlocklistsDirectory,
+		"block_action", c.Firewall.BlockAction,
+		"encrypted_dns", c.EncryptedDNSEnabled(),
+		"dnssec_validation", c.Security.DNSSECValidation,
+		"dns_cookies_enabled", c.Security.DNSCookiesEnabled,
+		"rate_limit_enabled", c.RateLimit.Enabled,
+		"trusted_subnets", len(c.Recursive.TrustedSubnets),
+		"dynamic_update_keys", len(c.Update.Keys),
+		"xfr_enabled", c.XFR.Enabled,
+		"xfr_allowed_subnets", len(c.XFR.AllowedSubnets),
+		"notify_slaves", len(c.XFR.NotifySlaves),
+		"acl_lists", len(c.ACL.Lists),
+		"views", len(c.Views.Entries),
+	}
+}
+
 // TrustedSubnetsCSV joins trusted subnet prefixes for ACL parsing.
 func (c Config) TrustedSubnetsCSV() (string, error) {
 	parts := make([]string, 0, len(c.Recursive.TrustedSubnets))
