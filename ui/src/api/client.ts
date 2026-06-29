@@ -228,3 +228,33 @@ export function disableZoneDNSSEC(
     { method: 'POST', body: { view } },
   )
 }
+
+export interface ZoneACLConfig {
+  allow_query?: string[]
+  allow_recursion?: string[]
+  allow_transfer?: string[]
+}
+
+export interface ACLConfig {
+  match_lists: Record<string, string[]>
+  allow_query: string[]
+  allow_recursion: string[]
+  allow_transfer: string[]
+  zones?: Record<string, ZoneACLConfig>
+}
+
+export interface ACLConfigUpdateResponse {
+  success: boolean
+  requires_restart: boolean
+}
+
+export function fetchACLConfig(): Promise<ACLConfig> {
+  return apiRequest<ACLConfig>('/api/v1/config/acl')
+}
+
+export function updateACLConfig(config: ACLConfig): Promise<ACLConfigUpdateResponse> {
+  return apiRequest<ACLConfigUpdateResponse>('/api/v1/config/acl', {
+    method: 'PUT',
+    body: config,
+  })
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   FileText,
@@ -20,13 +20,10 @@ import {
   type AppConfig,
 } from '@/api/config'
 import {
-  createACLRule,
-  deleteACLRule,
-  fetchACLRules,
-  updateACLRule,
-  type ACLAction,
-  type ACLRule,
-} from '@/api/settings'
+  fetchACLConfig,
+  updateACLConfig,
+  type ACLConfig,
+} from '@/api/client'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -54,6 +51,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import TokenInput from '@/components/ui/token-input/TokenInput.vue'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   TOAST_POSITION_OPTIONS,
@@ -64,6 +62,15 @@ import { parseApiError } from '@/utils/apiError'
 
 const TAB_IDS = ['dns', 'security', 'logging', 'ui'] as const
 type TabId = (typeof TAB_IDS)[number]
+
+const ACL_KEYWORDS = ['any', 'none', 'localhost'] as const
+
+const EMPTY_ACL: ACLConfig = {
+  match_lists: {},
+  allow_query: [],
+  allow_recursion: [],
+  allow_transfer: [],
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -77,25 +84,24 @@ const requiresRestart = ref(false)
 const toastPosition = useToastPosition()
 
 const upstreams = ref<string[]>([])
-const trustedSubnets = ref<string[]>([])
+
+const aclConfig = ref<ACLConfig | null>(null)
+const aclLoading = ref(true)
+const aclSaving = ref(false)
+const matchLists = ref<Record<string, string[]>>({})
+const allowQuery = ref<string[]>([])
+const allowRecursion = ref<string[]>([])
+const allowTransfer = ref<string[]>([])
+
+const matchListDialogOpen = ref(false)
+const editingMatchListName = ref<string | null>(null)
+const matchListNameInput = ref('')
+const matchListValues = ref<string[]>([])
+const deletingMatchListName = ref<string | null>(null)
 
 const upstreamDialogOpen = ref(false)
 const upstreamInput = ref('')
 const deletingUpstreamIndex = ref<number | null>(null)
-
-const rules = ref<ACLRule[]>([])
-const aclLoading = ref(true)
-const ruleDialogOpen = ref(false)
-const editingRuleId = ref<number | null>(null)
-const ruleSubnet = ref('')
-const ruleDescription = ref('')
-const ruleAction = ref<ACLAction>('allow')
-const savingRule = ref(false)
-const deletingId = ref<number | null>(null)
-
-const trustedDialogOpen = ref(false)
-const trustedSubnetInput = ref('')
-const deletingTrustedIndex = ref<number | null>(null)
 
 function isValidTab(value: string): value is TabId {
   return TAB_IDS.includes(value as TabId)
@@ -114,7 +120,43 @@ function syncTabFromRoute(): void {
 
 function applyConfigToForm(cfg: AppConfig): void {
   upstreams.value = [...cfg.recursive.upstreams]
-  trustedSubnets.value = [...cfg.recursive.trusted_subnets]
+}
+
+function applyACLToForm(cfg: ACLConfig | null | undefined): void {
+  const safe = cfg ?? EMPTY_ACL
+  matchLists.value = Object.fromEntries(
+    Object.entries(safe.match_lists ?? {}).map(([name, values]) => [
+      name,
+      [...(values ?? [])],
+    ]),
+  )
+  allowQuery.value = [...(safe.allow_query ?? [])]
+  allowRecursion.value = [...(safe.allow_recursion ?? [])]
+  allowTransfer.value = [...(safe.allow_transfer ?? [])]
+}
+
+const matchListEntries = computed(() =>
+  Object.entries(matchLists.value ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+)
+
+const policySuggestions = computed(() => {
+  const listNames = Object.keys(matchLists.value ?? {}).sort()
+  return [...ACL_KEYWORDS, ...listNames]
+})
+
+function buildACLPayload(): ACLConfig {
+  return {
+    match_lists: Object.fromEntries(
+      Object.entries(matchLists.value).map(([name, values]) => [
+        name,
+        values.map((value) => value.trim()).filter(Boolean),
+      ]),
+    ),
+    allow_query: allowQuery.value.map((value) => value.trim()).filter(Boolean),
+    allow_recursion: allowRecursion.value.map((value) => value.trim()).filter(Boolean),
+    allow_transfer: allowTransfer.value.map((value) => value.trim()).filter(Boolean),
+    zones: aclConfig.value?.zones,
+  }
 }
 
 function buildConfigPayload(): AppConfig {
@@ -124,9 +166,6 @@ function buildConfigPayload(): AppConfig {
   const payload = cloneAppConfig(config.value)
   payload.recursive.upstreams = upstreams.value
     .map((upstream) => upstream.trim())
-    .filter(Boolean)
-  payload.recursive.trusted_subnets = trustedSubnets.value
-    .map((subnet) => subnet.trim())
     .filter(Boolean)
   return payload
 }
@@ -163,100 +202,79 @@ async function saveConfig(section: string): Promise<void> {
   }
 }
 
-async function loadRules(): Promise<void> {
+async function loadACL(): Promise<void> {
   aclLoading.value = true
   try {
-    const response = await fetchACLRules()
-    rules.value = response.rules
+    const loaded = await fetchACLConfig()
+    aclConfig.value = loaded ?? EMPTY_ACL
+    applyACLToForm(loaded)
   } catch (err) {
-    notify(parseApiError(err, 'Failed to load ACL rules'), 'error')
+    notify(parseApiError(err, 'Failed to load ACL configuration'), 'error')
+    aclConfig.value = EMPTY_ACL
+    applyACLToForm(EMPTY_ACL)
   } finally {
     aclLoading.value = false
   }
 }
 
-function openAddRuleDialog(): void {
-  editingRuleId.value = null
-  ruleSubnet.value = ''
-  ruleDescription.value = ''
-  ruleAction.value = 'allow'
-  ruleDialogOpen.value = true
-}
-
-function openEditRuleDialog(rule: ACLRule): void {
-  editingRuleId.value = rule.id
-  ruleSubnet.value = rule.subnet
-  ruleDescription.value = rule.description ?? ''
-  ruleAction.value = rule.action
-  ruleDialogOpen.value = true
-}
-
-async function submitRuleDialog(): Promise<void> {
-  const subnet = ruleSubnet.value.trim()
-  if (!subnet) {
-    notify('Subnet or IP address is required', 'error')
-    return
-  }
-
-  savingRule.value = true
+async function saveACL(): Promise<void> {
+  aclSaving.value = true
   try {
-    if (editingRuleId.value === null) {
-      await createACLRule(subnet, ruleDescription.value, ruleAction.value)
-      notify('ACL rule added')
-    } else {
-      await updateACLRule(
-        editingRuleId.value,
-        subnet,
-        ruleDescription.value,
-        ruleAction.value,
-      )
-      notify('ACL rule updated')
-    }
-    ruleDialogOpen.value = false
-    await loadRules()
+    await updateACLConfig(buildACLPayload())
+    notify('Security & ACL settings saved')
+    await loadACL()
   } catch (err) {
-    notify(parseApiError(err, 'Failed to save ACL rule'), 'error')
+    notify(parseApiError(err, 'Failed to save ACL configuration'), 'error')
   } finally {
-    savingRule.value = false
+    aclSaving.value = false
   }
 }
 
-async function removeRule(id: number): Promise<void> {
-  deletingId.value = id
-  try {
-    await deleteACLRule(id)
-    await loadRules()
-    notify('ACL rule removed')
-  } catch (err) {
-    notify(parseApiError(err, 'Failed to delete ACL rule'), 'error')
-  } finally {
-    deletingId.value = null
-  }
+function openAddMatchListDialog(): void {
+  editingMatchListName.value = null
+  matchListNameInput.value = ''
+  matchListValues.value = []
+  matchListDialogOpen.value = true
 }
 
-function openTrustedDialog(): void {
-  trustedSubnetInput.value = ''
-  trustedDialogOpen.value = true
+function openEditMatchListDialog(name: string, values: string[]): void {
+  editingMatchListName.value = name
+  matchListNameInput.value = name
+  matchListValues.value = [...values]
+  matchListDialogOpen.value = true
 }
 
-function addTrustedSubnet(): void {
-  const subnet = trustedSubnetInput.value.trim()
-  if (!subnet) {
-    notify('Subnet or IP address is required', 'error')
+function submitMatchListDialog(): void {
+  const name = matchListNameInput.value.trim()
+  if (!name) {
+    notify('Match list name is required', 'error')
     return
   }
-  if (trustedSubnets.value.includes(subnet)) {
-    notify('Subnet is already listed', 'error')
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
+    notify('Name must start with a letter and contain only letters, digits, hyphens, or underscores', 'error')
     return
   }
-  trustedSubnets.value = [...trustedSubnets.value, subnet]
-  trustedDialogOpen.value = false
+  const values = matchListValues.value.map((value) => value.trim()).filter(Boolean)
+  if (values.length === 0) {
+    notify('At least one network entry is required', 'error')
+    return
+  }
+
+  const next = { ...matchLists.value }
+  if (editingMatchListName.value && editingMatchListName.value !== name) {
+    delete next[editingMatchListName.value]
+  }
+  next[name] = values
+  matchLists.value = next
+  matchListDialogOpen.value = false
 }
 
-function removeTrustedSubnet(index: number): void {
-  deletingTrustedIndex.value = index
-  trustedSubnets.value = trustedSubnets.value.filter((_, i) => i !== index)
-  deletingTrustedIndex.value = null
+function removeMatchList(name: string): void {
+  deletingMatchListName.value = name
+  const next = { ...matchLists.value }
+  delete next[name]
+  matchLists.value = next
+  deletingMatchListName.value = null
 }
 
 function openUpstreamDialog(): void {
@@ -284,12 +302,6 @@ function removeUpstream(index: number): void {
   deletingUpstreamIndex.value = null
 }
 
-function actionBadgeClass(action: ACLAction): string {
-  return action === 'block'
-    ? 'bg-destructive/10 text-destructive'
-    : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-}
-
 watch(activeTab, (tab) => {
   router.replace({ query: { ...route.query, tab } })
 })
@@ -304,7 +316,7 @@ watch(
 onMounted(() => {
   syncTabFromRoute()
   void loadConfig()
-  void loadRules()
+  void loadACL()
 })
 </script>
 
@@ -350,10 +362,7 @@ onMounted(() => {
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-6">
-            <div
-              v-if="configLoading"
-              class="flex items-center gap-2 py-8 text-sm text-muted-foreground"
-            >
+            <div v-if="configLoading" class="flex items-center gap-2 py-8 text-sm text-muted-foreground">
               <Loader2 class="size-4 animate-spin" />
               Loading configuration…
             </div>
@@ -362,10 +371,8 @@ onMounted(() => {
               <div class="grid gap-4 sm:grid-cols-2">
                 <div class="grid gap-2">
                   <Label for="resolver-mode">Resolver mode</Label>
-                  <Select
-                    :model-value="config.resolver.mode"
-                    @update:model-value="(v) => { config!.resolver.mode = String(v) }"
-                  >
+                  <Select :model-value="config.resolver.mode"
+                    @update:model-value="(v) => { config!.resolver.mode = String(v) }">
                     <SelectTrigger id="resolver-mode">
                       <SelectValue placeholder="Select mode" />
                     </SelectTrigger>
@@ -377,26 +384,17 @@ onMounted(() => {
                 </div>
                 <div class="grid gap-2">
                   <Label for="root-hints-file">Root hints file</Label>
-                  <Input
-                    id="root-hints-file"
-                    v-model="config.resolver.root_hints_file"
-                  />
+                  <Input id="root-hints-file" v-model="config.resolver.root_hints_file" />
                 </div>
               </div>
 
               <div class="flex flex-wrap gap-6">
                 <div class="flex items-center gap-2">
-                  <Switch
-                    id="auto-root-hints"
-                    v-model:checked="config.resolver.auto_update_root_hints"
-                  />
+                  <Switch id="auto-root-hints" v-model:checked="config.resolver.auto_update_root_hints" />
                   <Label for="auto-root-hints">Auto-update root hints</Label>
                 </div>
                 <div class="flex items-center gap-2">
-                  <Switch
-                    id="qname-min"
-                    v-model:checked="config.resolver.qname_minimization"
-                  />
+                  <Switch id="qname-min" v-model:checked="config.resolver.qname_minimization" />
                   <Label for="qname-min">QNAME minimization</Label>
                 </div>
               </div>
@@ -415,10 +413,8 @@ onMounted(() => {
                   </Button>
                 </div>
 
-                <div
-                  v-if="upstreams.length === 0"
-                  class="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground"
-                >
+                <div v-if="upstreams.length === 0"
+                  class="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
                   No upstream resolvers configured. At least one is required in forward mode.
                 </div>
 
@@ -431,26 +427,15 @@ onMounted(() => {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr
-                        v-for="(upstream, index) in upstreams"
-                        :key="`${upstream}-${index}`"
-                        class="border-b last:border-b-0"
-                      >
+                      <tr v-for="(upstream, index) in upstreams" :key="`${upstream}-${index}`"
+                        class="border-b last:border-b-0">
                         <td class="px-4 py-3 font-mono text-xs sm:text-sm">
                           {{ upstream }}
                         </td>
                         <td class="px-4 py-3 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="size-8 text-destructive hover:text-destructive"
-                            :disabled="deletingUpstreamIndex === index"
-                            @click="removeUpstream(index)"
-                          >
-                            <Loader2
-                              v-if="deletingUpstreamIndex === index"
-                              class="size-4 animate-spin"
-                            />
+                          <Button variant="ghost" size="icon" class="size-8 text-destructive hover:text-destructive"
+                            :disabled="deletingUpstreamIndex === index" @click="removeUpstream(index)">
+                            <Loader2 v-if="deletingUpstreamIndex === index" class="size-4 animate-spin" />
                             <Trash2 v-else class="size-4" />
                           </Button>
                         </td>
@@ -473,21 +458,11 @@ onMounted(() => {
                 <div class="grid gap-4 sm:grid-cols-2">
                   <div class="grid gap-2">
                     <Label for="rate-rps">Requests per second</Label>
-                    <Input
-                      id="rate-rps"
-                      v-model.number="config.rate_limit.requests_per_second"
-                      type="number"
-                      min="1"
-                    />
+                    <Input id="rate-rps" v-model.number="config.rate_limit.requests_per_second" type="number" min="1" />
                   </div>
                   <div class="grid gap-2">
                     <Label for="rate-burst">Burst</Label>
-                    <Input
-                      id="rate-burst"
-                      v-model.number="config.rate_limit.burst"
-                      type="number"
-                      min="1"
-                    />
+                    <Input id="rate-burst" v-model.number="config.rate_limit.burst" type="number" min="1" />
                   </div>
                 </div>
               </div>
@@ -509,160 +484,57 @@ onMounted(() => {
           <Card>
             <CardHeader class="flex flex-row items-start justify-between gap-4 space-y-0">
               <div class="space-y-1">
-                <CardTitle>Recursive trusted subnets</CardTitle>
+                <CardTitle>Match Lists (Network Groups)</CardTitle>
                 <CardDescription>
-                  Clients in these CIDR ranges may send recursive queries.
+                  Named groups of IP addresses and CIDR ranges. Reference these names in global and zone policies below.
                 </CardDescription>
               </div>
-              <Button size="sm" :disabled="!config" @click="openTrustedDialog">
+              <Button size="sm" :disabled="aclLoading" @click="openAddMatchListDialog">
                 <Plus class="mr-1.5 size-4" />
-                Add Subnet
+                Add Group
               </Button>
             </CardHeader>
             <CardContent class="space-y-4">
-              <div
-                v-if="trustedSubnets.length === 0"
-                class="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground"
-              >
-                No trusted subnets configured. Recursive queries from any client may be refused.
-              </div>
-
-              <div v-else class="overflow-x-auto rounded-md border">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b bg-muted/40 text-left">
-                      <th class="px-4 py-3 font-medium">Subnet</th>
-                      <th class="w-20 px-4 py-3 font-medium text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="(subnet, index) in trustedSubnets"
-                      :key="`${subnet}-${index}`"
-                      class="border-b last:border-b-0"
-                    >
-                      <td class="px-4 py-3 font-mono text-xs sm:text-sm">
-                        {{ subnet }}
-                      </td>
-                      <td class="px-4 py-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="size-8 text-destructive hover:text-destructive"
-                          :disabled="deletingTrustedIndex === index"
-                          @click="removeTrustedSubnet(index)"
-                        >
-                          <Loader2
-                            v-if="deletingTrustedIndex === index"
-                            class="size-4 animate-spin"
-                          />
-                          <Trash2 v-else class="size-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              <div class="flex justify-end">
-                <Button
-                  :disabled="configSaving || !config"
-                  @click="saveConfig('Security')"
-                >
-                  <Loader2 v-if="configSaving" class="mr-1.5 size-4 animate-spin" />
-                  <Save v-else class="mr-1.5 size-4" />
-                  Save trusted subnets
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader class="flex flex-row items-start justify-between gap-4 space-y-0">
-              <div class="space-y-1">
-                <CardTitle class="flex items-center gap-2 text-lg">
-                  <ShieldCheck class="size-5 text-muted-foreground" />
-                  Query ACL rules
-                </CardTitle>
-                <CardDescription>
-                  Restrict DNS queries to specific IP addresses or CIDR subnets. When no
-                  rules are configured, all clients are allowed.
-                </CardDescription>
-              </div>
-              <Button size="sm" @click="openAddRuleDialog">
-                <Plus class="mr-1.5 size-4" />
-                Add Subnet
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <div
-                v-if="aclLoading"
-                class="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"
-              >
+              <div v-if="aclLoading" class="flex items-center gap-2 py-8 text-sm text-muted-foreground">
                 <Loader2 class="size-4 animate-spin" />
-                Loading ACL rules…
+                Loading ACL configuration…
               </div>
 
-              <div
-                v-else-if="rules.length === 0"
-                class="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground"
-              >
-                No ACL rules configured. All clients may send DNS queries.
+              <div v-else-if="matchListEntries.length === 0"
+                class="rounded-md border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                No match lists defined. Create a group such as
+                <span class="font-mono">trusted-lan</span> with your LAN CIDRs.
               </div>
 
               <div v-else class="overflow-x-auto rounded-md border">
                 <table class="w-full text-sm">
                   <thead>
                     <tr class="border-b bg-muted/40 text-left">
-                      <th class="px-4 py-3 font-medium">Subnet</th>
-                      <th class="px-4 py-3 font-medium">Description</th>
-                      <th class="px-4 py-3 font-medium">Action</th>
+                      <th class="px-4 py-3 font-medium">Name</th>
+                      <th class="px-4 py-3 font-medium">Networks</th>
                       <th class="w-28 px-4 py-3 font-medium text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr
-                      v-for="rule in rules"
-                      :key="rule.id"
-                      class="border-b last:border-b-0"
-                    >
-                      <td class="px-4 py-3 font-mono text-xs sm:text-sm">
-                        {{ rule.subnet }}
-                      </td>
-                      <td class="px-4 py-3 text-muted-foreground">
-                        {{ rule.description || '—' }}
-                      </td>
+                    <tr v-for="[name, values] in matchListEntries" :key="name" class="border-b last:border-b-0">
+                      <td class="px-4 py-3 font-mono text-xs sm:text-sm">{{ name }}</td>
                       <td class="px-4 py-3">
-                        <span
-                          :class="[
-                            'rounded px-1.5 py-0.5 text-xs font-medium uppercase tracking-wide',
-                            actionBadgeClass(rule.action),
-                          ]"
-                        >
-                          {{ rule.action }}
-                        </span>
+                        <div class="flex flex-wrap gap-1">
+                          <span v-for="value in values" :key="value"
+                            class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                            {{ value }}
+                          </span>
+                        </div>
                       </td>
                       <td class="px-4 py-3 text-right">
                         <div class="inline-flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="size-8"
-                            @click="openEditRuleDialog(rule)"
-                          >
+                          <Button variant="ghost" size="icon" class="size-8"
+                            @click="openEditMatchListDialog(name, values)">
                             <Pencil class="size-4" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="size-8 text-destructive hover:text-destructive"
-                            :disabled="deletingId === rule.id"
-                            @click="removeRule(rule.id)"
-                          >
-                            <Loader2
-                              v-if="deletingId === rule.id"
-                              class="size-4 animate-spin"
-                            />
+                          <Button variant="ghost" size="icon" class="size-8 text-destructive hover:text-destructive"
+                            :disabled="deletingMatchListName === name" @click="removeMatchList(name)">
+                            <Loader2 v-if="deletingMatchListName === name" class="size-4 animate-spin" />
                             <Trash2 v-else class="size-4" />
                           </Button>
                         </div>
@@ -670,6 +542,53 @@ onMounted(() => {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Global Policies</CardTitle>
+              <CardDescription>
+                BIND9-style ACL directives applied server-wide. Use keywords
+                (<span class="font-mono">any</span>, <span class="font-mono">none</span>,
+                <span class="font-mono">localhost</span>), raw IPs/CIDRs, or match list names.
+              </CardDescription>
+            </CardHeader>
+            <CardContent class="space-y-6">
+              <div class="grid gap-2">
+                <Label for="allow-query">Allow Query</Label>
+                <p class="text-xs text-muted-foreground">
+                  Clients permitted to send DNS queries. Defaults to <span class="font-mono">any</span> when empty.
+                </p>
+                <TokenInput id="allow-query" v-model="allowQuery" :suggestions="policySuggestions"
+                  placeholder="any, trusted-lan, 10.0.0.0/8…" :disabled="aclLoading" />
+              </div>
+
+              <div class="grid gap-2">
+                <Label for="allow-recursion">Allow Recursion</Label>
+                <p class="text-xs text-muted-foreground">
+                  Clients permitted to use recursive resolution. Falls back to legacy trusted subnets when empty.
+                </p>
+                <TokenInput id="allow-recursion" v-model="allowRecursion" :suggestions="policySuggestions"
+                  placeholder="trusted-lan, localhost…" :disabled="aclLoading" />
+              </div>
+
+              <div class="grid gap-2">
+                <Label for="allow-transfer">Allow Transfer</Label>
+                <p class="text-xs text-muted-foreground">
+                  Clients permitted to request zone transfers (AXFR/IXFR).
+                </p>
+                <TokenInput id="allow-transfer" v-model="allowTransfer" :suggestions="policySuggestions"
+                  placeholder="none, trusted-lan…" :disabled="aclLoading" />
+              </div>
+
+              <div class="flex justify-end">
+                <Button :disabled="aclSaving || aclLoading" @click="saveACL">
+                  <Loader2 v-if="aclSaving" class="mr-1.5 size-4 animate-spin" />
+                  <Save v-else class="mr-1.5 size-4" />
+                  Save Security &amp; ACL
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -688,10 +607,8 @@ onMounted(() => {
             <template v-if="config">
               <div class="grid gap-2">
                 <Label for="log-level">Log level</Label>
-                <Select
-                  :model-value="config.server.log_level"
-                  @update:model-value="(v) => { config!.server.log_level = String(v) }"
-                >
+                <Select :model-value="config.server.log_level"
+                  @update:model-value="(v) => { config!.server.log_level = String(v) }">
                   <SelectTrigger id="log-level">
                     <SelectValue placeholder="Select level" />
                   </SelectTrigger>
@@ -712,30 +629,15 @@ onMounted(() => {
               <div class="grid grid-cols-3 gap-3">
                 <div class="grid gap-2">
                   <Label for="max-size">Max size (MB)</Label>
-                  <Input
-                    id="max-size"
-                    v-model.number="config.logging.max_size_mb"
-                    type="number"
-                    min="1"
-                  />
+                  <Input id="max-size" v-model.number="config.logging.max_size_mb" type="number" min="1" />
                 </div>
                 <div class="grid gap-2">
                   <Label for="max-backups">Max backups</Label>
-                  <Input
-                    id="max-backups"
-                    v-model.number="config.logging.max_backups"
-                    type="number"
-                    min="0"
-                  />
+                  <Input id="max-backups" v-model.number="config.logging.max_backups" type="number" min="0" />
                 </div>
                 <div class="grid gap-2">
                   <Label for="max-age">Max age (days)</Label>
-                  <Input
-                    id="max-age"
-                    v-model.number="config.logging.max_age_days"
-                    type="number"
-                    min="0"
-                  />
+                  <Input id="max-age" v-model.number="config.logging.max_age_days" type="number" min="0" />
                 </div>
               </div>
 
@@ -762,19 +664,13 @@ onMounted(() => {
           <CardContent class="space-y-4">
             <div class="grid gap-2 sm:max-w-xs">
               <Label for="toast-position">Notification position</Label>
-              <Select
-                :model-value="toastPosition"
-                @update:model-value="(v) => { toastPosition = String(v) as ToastPosition }"
-              >
+              <Select :model-value="toastPosition"
+                @update:model-value="(v) => { toastPosition = String(v) as ToastPosition }">
                 <SelectTrigger id="toast-position">
                   <SelectValue placeholder="Select position" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem
-                    v-for="position in TOAST_POSITION_OPTIONS"
-                    :key="position.value"
-                    :value="position.value"
-                  >
+                  <SelectItem v-for="position in TOAST_POSITION_OPTIONS" :key="position.value" :value="position.value">
                     {{ position.label }}
                   </SelectItem>
                 </SelectContent>
@@ -788,56 +684,30 @@ onMounted(() => {
       </TabsContent>
     </Tabs>
 
-    <Dialog v-model:open="ruleDialogOpen">
+    <Dialog v-model:open="matchListDialogOpen">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{{ editingRuleId === null ? 'Add Subnet' : 'Edit Rule' }}</DialogTitle>
+          <DialogTitle>
+            {{ editingMatchListName === null ? 'Add Match List' : 'Edit Match List' }}
+          </DialogTitle>
           <DialogDescription>
-            Enter an IP address (e.g. 192.168.1.10) or CIDR block (e.g. 10.0.0.0/8).
+            Define a named network group. Use letters, digits, hyphens, and underscores in the name.
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-2">
           <div class="grid gap-2">
-            <Label for="acl-subnet">Subnet / IP</Label>
-            <Input
-              id="acl-subnet"
-              v-model="ruleSubnet"
-              placeholder="192.168.0.0/16"
-              autocomplete="off"
-              @keyup.enter="submitRuleDialog"
-            />
+            <Label for="match-list-name">Name</Label>
+            <Input id="match-list-name" v-model="matchListNameInput" placeholder="trusted-lan" autocomplete="off" />
           </div>
           <div class="grid gap-2">
-            <Label for="acl-action">Action</Label>
-            <Select
-              :model-value="ruleAction"
-              @update:model-value="(v) => { ruleAction = String(v) as ACLAction }"
-            >
-              <SelectTrigger id="acl-action">
-                <SelectValue placeholder="Select action" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="allow">Allow</SelectItem>
-                <SelectItem value="block">Block</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div class="grid gap-2">
-            <Label for="acl-description">Description (optional)</Label>
-            <Input
-              id="acl-description"
-              v-model="ruleDescription"
-              placeholder="Office LAN"
-              autocomplete="off"
-              @keyup.enter="submitRuleDialog"
-            />
+            <Label for="match-list-values">Networks</Label>
+            <TokenInput id="match-list-values" v-model="matchListValues" placeholder="192.168.0.0/16, 10.0.0.0/8…" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="ruleDialogOpen = false">Cancel</Button>
-          <Button :disabled="savingRule" @click="submitRuleDialog">
-            <Loader2 v-if="savingRule" class="mr-1.5 size-4 animate-spin" />
-            {{ editingRuleId === null ? 'Add Rule' : 'Save Changes' }}
+          <Button variant="outline" @click="matchListDialogOpen = false">Cancel</Button>
+          <Button @click="submitMatchListDialog">
+            {{ editingMatchListName === null ? 'Add Group' : 'Save Changes' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -854,45 +724,13 @@ onMounted(() => {
         <div class="grid gap-4 py-2">
           <div class="grid gap-2">
             <Label for="upstream-address">IP / Hostname</Label>
-            <Input
-              id="upstream-address"
-              v-model="upstreamInput"
-              placeholder="1.1.1.1 or 1.1.1.1:53"
-              autocomplete="off"
-              @keyup.enter="addUpstream"
-            />
+            <Input id="upstream-address" v-model="upstreamInput" placeholder="1.1.1.1 or 1.1.1.1:53" autocomplete="off"
+              @keyup.enter="addUpstream" />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="upstreamDialogOpen = false">Cancel</Button>
           <Button @click="addUpstream">Add Upstream</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <Dialog v-model:open="trustedDialogOpen">
-      <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add Trusted Subnet</DialogTitle>
-          <DialogDescription>
-            Clients in this range may send recursive DNS queries.
-          </DialogDescription>
-        </DialogHeader>
-        <div class="grid gap-4 py-2">
-          <div class="grid gap-2">
-            <Label for="trusted-subnet">Subnet / IP</Label>
-            <Input
-              id="trusted-subnet"
-              v-model="trustedSubnetInput"
-              placeholder="10.0.0.0/8"
-              autocomplete="off"
-              @keyup.enter="addTrustedSubnet"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="trustedDialogOpen = false">Cancel</Button>
-          <Button @click="addTrustedSubnet">Add Subnet</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -80,6 +80,20 @@ export interface XFRConfig {
   notify_slaves: string[]
 }
 
+export interface ZoneACLConfig {
+  allow_query?: string[]
+  allow_recursion?: string[]
+  allow_transfer?: string[]
+}
+
+export interface ACLSectionConfig {
+  lists?: Record<string, string[]>
+  allow_query?: string[]
+  allow_recursion?: string[]
+  allow_transfer?: string[]
+  zones?: Record<string, ZoneACLConfig>
+}
+
 export interface AppConfig {
   server: ServerConfig
   tls: TLSConfig
@@ -95,6 +109,7 @@ export interface AppConfig {
   security: SecurityConfig
   update: UpdateConfig
   xfr: XFRConfig
+  acl?: ACLSectionConfig
 }
 
 export interface ConfigUpdateResponse {

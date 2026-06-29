@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Loader2, Pencil, Plus, Shield, Trash2 } from 'lucide-vue-next'
+import { useStorage } from '@vueuse/core'
+import { EllipsisVertical, Loader2, Pencil, Plus, Save, Settings, Shield, Trash2 } from 'lucide-vue-next'
 import { notify } from '@/composables/useNotifications'
 import {
   createZone,
@@ -9,10 +10,13 @@ import {
   deleteZoneRecord,
   disableZoneDNSSEC,
   enableZoneDNSSEC,
+  fetchACLConfig,
   fetchZoneDNSSEC,
   fetchZoneRecords,
   fetchZones,
+  updateACLConfig,
   updateZoneRecord,
+  type ACLConfig,
   type ZoneDNSSECStatus,
   type ZoneInfo,
   type ZoneRecord,
@@ -54,7 +58,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
-import { Switch } from '@/components/ui/switch'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import TokenInput from '@/components/ui/token-input/TokenInput.vue'
 import ClipboardText from '@/components/ClipboardText.vue'
 import { cn } from '@/lib/utils'
 import {
@@ -110,7 +121,20 @@ const loadingDNSSEC = ref(false)
 const enablingDNSSEC = ref(false)
 const disablingDNSSEC = ref(false)
 const dnssecStatus = ref<ZoneDNSSECStatus | null>(null)
-const showDNSSECRecords = ref(false)
+const showDNSSECRecords = useStorage('arx-dns-zones-show-dnssec', false)
+
+const aclConfig = ref<ACLConfig | null>(null)
+const zoneAllowQuery = ref<string[]>([])
+const zoneAllowTransfer = ref<string[]>([])
+const savingZoneACL = ref(false)
+const zoneSettingsDialogOpen = ref(false)
+
+const ACL_KEYWORDS = ['any', 'none', 'localhost'] as const
+
+const zonePolicySuggestions = computed(() => {
+  const listNames = Object.keys(aclConfig.value?.match_lists ?? {}).sort()
+  return [...ACL_KEYWORDS, ...listNames]
+})
 
 const DNSSEC_RECORD_TYPES = new Set(['RRSIG', 'NSEC', 'DNSKEY'])
 
@@ -180,6 +204,76 @@ function setSelectString(
   value: string,
 ): void {
   form.value[field] = value as never
+}
+
+function zoneACLKey(origin: string): string {
+  const trimmed = origin.trim()
+  if (!trimmed || trimmed === '.') {
+    return '.'
+  }
+  return trimmed.endsWith('.') ? trimmed : `${trimmed}.`
+}
+
+async function loadACLConfig(): Promise<void> {
+  try {
+    aclConfig.value = await fetchACLConfig()
+  } catch (err) {
+    aclConfig.value = null
+    notify(parseApiError(err, 'Failed to load ACL configuration'), 'error')
+  }
+}
+
+function openZoneSettingsDialog(): void {
+  applyZoneACLFromConfig()
+  zoneSettingsDialogOpen.value = true
+}
+
+function applyZoneACLFromConfig(): void {
+  if (!selectedZone.value || !aclConfig.value) {
+    zoneAllowQuery.value = []
+    zoneAllowTransfer.value = []
+    return
+  }
+  const key = zoneACLKey(selectedZone.value.origin)
+  const zoneCfg = aclConfig.value.zones?.[key]
+  zoneAllowQuery.value = [...(zoneCfg?.allow_query ?? [])]
+  zoneAllowTransfer.value = [...(zoneCfg?.allow_transfer ?? [])]
+}
+
+async function saveZoneACL(): Promise<void> {
+  if (!selectedZone.value || !aclConfig.value) {
+    return
+  }
+  savingZoneACL.value = true
+  try {
+    const key = zoneACLKey(selectedZone.value.origin)
+    const zones = { ...(aclConfig.value.zones ?? {}) }
+    const allowQuery = zoneAllowQuery.value.map((v) => v.trim()).filter(Boolean)
+    const allowTransfer = zoneAllowTransfer.value.map((v) => v.trim()).filter(Boolean)
+
+    if (allowQuery.length === 0 && allowTransfer.length === 0) {
+      delete zones[key]
+    } else {
+      zones[key] = {
+        ...(zones[key] ?? {}),
+        allow_query: allowQuery.length > 0 ? allowQuery : undefined,
+        allow_transfer: allowTransfer.length > 0 ? allowTransfer : undefined,
+      }
+    }
+
+    await updateACLConfig({
+      ...aclConfig.value,
+      zones,
+    })
+    await loadACLConfig()
+    applyZoneACLFromConfig()
+    notify('Zone ACL overrides saved')
+    zoneSettingsDialogOpen.value = false
+  } catch (err) {
+    notify(parseApiError(err, 'Failed to save zone ACL'), 'error')
+  } finally {
+    savingZoneACL.value = false
+  }
 }
 
 function formatOrigin(origin: string): string {
@@ -493,6 +587,7 @@ function onRecordTypeChange(value: string): void {
 }
 
 watch(selectedZone, () => {
+  applyZoneACLFromConfig()
   void loadRecords()
 })
 
@@ -507,7 +602,8 @@ watch(
 )
 
 onMounted(async () => {
-  await loadZones()
+  await Promise.all([loadZones(), loadACLConfig()])
+  applyZoneACLFromConfig()
   await loadRecords()
 })
 </script>
@@ -522,11 +618,11 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          :disabled="!selectedZone || loadingDNSSEC"
-          @click="openDNSSECDialog"
-        >
+        <Button variant="outline" :disabled="!selectedZone" @click="openZoneSettingsDialog">
+          <Settings class="size-4" />
+          Settings
+        </Button>
+        <Button variant="outline" :disabled="!selectedZone || loadingDNSSEC" @click="openDNSSECDialog">
           <Shield class="size-4" />
           DNSSEC
         </Button>
@@ -614,70 +710,79 @@ onMounted(async () => {
             <Loader2 class="size-4 animate-spin" />
             Loading records...
           </div>
-          <div v-else-if="records.length === 0" class="py-10 text-center text-sm text-muted-foreground">
-            No records in this zone.
-          </div>
           <div v-else class="space-y-3">
-            <div class="flex items-center gap-2">
-              <Switch id="show-dnssec-records" v-model:checked="showDNSSECRecords" />
-              <Label for="show-dnssec-records" class="text-sm font-normal">
-                Show DNSSEC records
-              </Label>
+            <div v-if="records.length === 0" class="py-10 text-center text-sm text-muted-foreground">
+              No records in this zone.
             </div>
-            <div v-if="displayRecords.length === 0" class="py-10 text-center text-sm text-muted-foreground">
-              No user records to display. Enable "Show DNSSEC records" to view signing data.
-            </div>
-            <div v-else class="overflow-x-auto">
-            <table class="w-full min-w-[640px] text-left text-sm">
-              <thead>
-                <tr class="border-b border-border text-muted-foreground">
-                  <th class="px-3 py-2 font-medium">Name</th>
-                  <th class="px-3 py-2 font-medium">Type</th>
-                  <th class="px-3 py-2 font-medium">TTL</th>
-                  <th class="px-3 py-2 font-medium">Value</th>
-                  <th class="px-3 py-2 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="record in displayRecords" :key="record.id" class="border-b border-border/70 last:border-0">
-                  <td class="px-3 py-2 font-mono text-xs">
-                    {{ record.name }}
-                    <span class="text-muted-foreground">
-                      ({{ recordFqdn(record.name) }})
-                    </span>
-                  </td>
-                  <td class="px-3 py-2">
-                    <Badge :class="recordTypeBadgeClass(record.type)">
-                      {{ record.type }}
-                    </Badge>
-                  </td>
-                  <td class="px-3 py-2">{{ record.ttl }}</td>
-                  <td class="max-w-md truncate px-3 py-2 font-mono text-xs" :title="record.value">
-                    {{ record.value }}
-                  </td>
-                  <td class="px-3 py-2 text-right">
-                    <div class="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon-sm" :aria-label="`Edit ${record.name} ${record.type}`"
-                        @click="openEditDialog(record)">
-                        <Pencil class="size-4" />
-                      </Button>
-                      <Button
-                        v-if="record.type !== 'SOA'"
-                        variant="ghost"
-                        size="icon-sm"
-                        :disabled="deletingId === record.id"
-                        :aria-label="`Delete ${record.name} ${record.type}`"
-                        @click="openDeleteRecordDialog(record)"
-                      >
-                        <Loader2 v-if="deletingId === record.id" class="size-4 animate-spin" />
-                        <Trash2 v-else class="size-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            </div>
+            <template v-else>
+              <div class="flex items-center justify-end">
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <Button variant="outline" size="sm" class="gap-1.5">
+                      <EllipsisVertical class="size-4" />
+                      View
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" class="w-56">
+                    <DropdownMenuLabel>View options</DropdownMenuLabel>
+                    <DropdownMenuCheckboxItem :checked="showDNSSECRecords"
+                      @update:checked="(value) => { showDNSSECRecords = value === true }">
+                      Show DNSSEC records
+                    </DropdownMenuCheckboxItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              <div v-if="displayRecords.length === 0" class="py-10 text-center text-sm text-muted-foreground">
+                No user records to display. Enable "Show DNSSEC records" to view signing data.
+              </div>
+              <div v-else class="overflow-x-auto">
+                <table class="w-full min-w-[640px] text-left text-sm">
+                  <thead>
+                    <tr class="border-b border-border text-muted-foreground">
+                      <th class="px-3 py-2 font-medium">Name</th>
+                      <th class="px-3 py-2 font-medium">Type</th>
+                      <th class="px-3 py-2 font-medium">TTL</th>
+                      <th class="px-3 py-2 font-medium">Value</th>
+                      <th class="px-3 py-2 text-right font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="record in displayRecords" :key="record.id"
+                      class="border-b border-border/70 last:border-0">
+                      <td class="px-3 py-2 font-mono text-xs">
+                        {{ record.name }}
+                        <span class="text-muted-foreground">
+                          ({{ recordFqdn(record.name) }})
+                        </span>
+                      </td>
+                      <td class="px-3 py-2">
+                        <Badge :class="recordTypeBadgeClass(record.type)">
+                          {{ record.type }}
+                        </Badge>
+                      </td>
+                      <td class="px-3 py-2">{{ record.ttl }}</td>
+                      <td class="max-w-md truncate px-3 py-2 font-mono text-xs" :title="record.value">
+                        {{ record.value }}
+                      </td>
+                      <td class="px-3 py-2 text-right">
+                        <div class="flex justify-end gap-1">
+                          <Button variant="ghost" size="icon-sm" :aria-label="`Edit ${record.name} ${record.type}`"
+                            @click="openEditDialog(record)">
+                            <Pencil class="size-4" />
+                          </Button>
+                          <Button v-if="record.type !== 'SOA'" variant="ghost" size="icon-sm"
+                            :disabled="deletingId === record.id" :aria-label="`Delete ${record.name} ${record.type}`"
+                            @click="openDeleteRecordDialog(record)">
+                            <Loader2 v-if="deletingId === record.id" class="size-4 animate-spin" />
+                            <Trash2 v-else class="size-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
           </div>
         </CardContent>
       </Card>
@@ -1442,6 +1547,45 @@ onMounted(async () => {
       </DialogContent>
     </Dialog>
 
+    <Dialog v-model:open="zoneSettingsDialogOpen">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Zone Settings</DialogTitle>
+          <DialogDescription>
+            Optional ACL overrides for
+            <span v-if="selectedZone" class="font-medium text-foreground">
+              {{ formatOrigin(selectedOrigin) }}
+            </span>.
+            Leave empty to inherit server defaults.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <Label :for="`zone-allow-query-${selectedOrigin}`">Allow Query</Label>
+            <TokenInput :id="`zone-allow-query-${selectedOrigin}`" v-model="zoneAllowQuery"
+              :suggestions="zonePolicySuggestions" placeholder="trusted-lan, any…" />
+          </div>
+          <div class="grid gap-2">
+            <Label :for="`zone-allow-transfer-${selectedOrigin}`">Allow Transfer</Label>
+            <TokenInput :id="`zone-allow-transfer-${selectedOrigin}`" v-model="zoneAllowTransfer"
+              :suggestions="zonePolicySuggestions" placeholder="none, trusted-lan…" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="zoneSettingsDialogOpen = false">
+            Cancel
+          </Button>
+          <Button :disabled="savingZoneACL || !selectedZone" @click="saveZoneACL">
+            <Loader2 v-if="savingZoneACL" class="mr-1.5 size-4 animate-spin" />
+            <Save v-else class="mr-1.5 size-4" />
+            Save Zone ACL
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <Dialog v-model:open="dnssecDialogOpen">
       <DialogContent class="max-w-lg">
         <DialogHeader>
@@ -1461,9 +1605,7 @@ onMounted(async () => {
           <div class="rounded-md border border-border p-3 text-sm">
             <p class="font-medium">
               Status:
-              <span
-                :class="dnssecStatus?.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'"
-              >
+              <span :class="dnssecStatus?.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'">
                 {{ dnssecStatus?.enabled ? 'Enabled' : 'Disabled' }}
               </span>
             </p>
@@ -1485,29 +1627,20 @@ onMounted(async () => {
         </div>
 
         <DialogFooter class="gap-2 sm:justify-between">
-          <Button
-            v-if="dnssecStatus?.enabled"
-            type="button"
-            variant="destructive"
-            :disabled="disablingDNSSEC || loadingDNSSEC || !selectedZone"
-            @click="disableDNSSEC"
-          >
+          <Button v-if="dnssecStatus?.enabled" type="button" variant="destructive"
+            :disabled="disablingDNSSEC || loadingDNSSEC || !selectedZone" @click="disableDNSSEC">
             <Loader2 v-if="disablingDNSSEC" class="size-4 animate-spin" />
             Disable DNSSEC
           </Button>
           <div class="flex gap-2 sm:ml-auto">
-          <Button type="button" variant="outline" @click="dnssecDialogOpen = false">
-            Close
-          </Button>
-          <Button
-            v-if="!dnssecStatus?.enabled"
-            type="button"
-            :disabled="enablingDNSSEC || loadingDNSSEC || !selectedZone"
-            @click="enableDNSSEC"
-          >
-            <Loader2 v-if="enablingDNSSEC" class="size-4 animate-spin" />
-            Enable DNSSEC
-          </Button>
+            <Button type="button" variant="outline" @click="dnssecDialogOpen = false">
+              Close
+            </Button>
+            <Button v-if="!dnssecStatus?.enabled" type="button"
+              :disabled="enablingDNSSEC || loadingDNSSEC || !selectedZone" @click="enableDNSSEC">
+              <Loader2 v-if="enablingDNSSEC" class="size-4 animate-spin" />
+              Enable DNSSEC
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>
