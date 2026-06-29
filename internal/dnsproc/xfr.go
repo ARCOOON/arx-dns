@@ -102,7 +102,7 @@ func (p *Processor) streamZoneTransfer(client netip.Addr, req *mdns.Msg, writeFr
 		return writeFrame(resp)
 	}
 
-	if p.xfrACL == nil || !p.xfrACL.Trusted(client) {
+	if !p.transferAllowed(client, "") {
 		resp, err := p.xfrRefusedResponse(req, client, cookieCtx, false)
 		if err != nil {
 			return err
@@ -110,8 +110,8 @@ func (p *Processor) streamZoneTransfer(client netip.Addr, req *mdns.Msg, writeFr
 		return writeFrame(resp)
 	}
 
-	trusted := p.clientTrusted(client)
-	origin, view, ok := p.resolveXferZone(req.Question[0].Name, trusted)
+	view := p.selectView(client, req)
+	origin, xferView, ok := p.resolveXferZone(req.Question[0].Name, view)
 	if !ok {
 		resp := new(mdns.Msg)
 		resp.SetReply(req)
@@ -127,7 +127,15 @@ func (p *Processor) streamZoneTransfer(client netip.Addr, req *mdns.Msg, writeFr
 		return writeFrame(packed)
 	}
 
-	records := p.store.ZoneRecords(origin, view)
+	if !p.transferAllowed(client, origin) {
+		resp, err := p.xfrRefusedResponse(req, client, cookieCtx, false)
+		if err != nil {
+			return err
+		}
+		return writeFrame(resp)
+	}
+
+	records := p.store.ZoneRecords(origin, xferView)
 	soa := findSOARecord(records, origin)
 	if soa == nil {
 		resp := new(mdns.Msg)
@@ -182,7 +190,7 @@ func (p *Processor) streamZoneTransfer(client netip.Addr, req *mdns.Msg, writeFr
 		p.logger.Info("zone transfer completed",
 			"client", client.String(),
 			"zone", origin,
-			"view", view,
+			"view", xferView,
 			"qtype", mdns.TypeToString[req.Question[0].Qtype],
 			"records", len(records),
 		)
@@ -203,16 +211,26 @@ func (p *Processor) writeXferMessage(req *mdns.Msg, client netip.Addr, cookieCtx
 	return writeFrame(packed)
 }
 
-func (p *Processor) resolveXferZone(qname string, trusted bool) (origin string, view storage.ZoneView, ok bool) {
+func (p *Processor) transferAllowed(client netip.Addr, zoneApex string) bool {
+	if p.policyEngine != nil {
+		return p.policyEngine.AllowTransfer(client, zoneApex)
+	}
+	if p.xfrACL == nil {
+		return false
+	}
+	return p.xfrACL.Trusted(client)
+}
+
+func (p *Processor) resolveXferZone(qname string, view storage.ZoneView) (origin string, zoneView storage.ZoneView, ok bool) {
 	qname = storage.NormalizeName(qname)
 	labels := splitDNSLabels(qname)
 	for i := len(labels) - 1; i >= 0; i-- {
 		apex := strings.Join(labels[i:], ".") + "."
+		if view == storage.ViewInternal && p.store.ZoneExists(apex, storage.ViewInternal) {
+			return apex, storage.ViewInternal, true
+		}
 		if p.store.ZoneExists(apex, storage.ViewPublic) {
 			return apex, storage.ViewPublic, true
-		}
-		if trusted && p.store.ZoneExists(apex, storage.ViewInternal) {
-			return apex, storage.ViewInternal, true
 		}
 	}
 	return "", "", false

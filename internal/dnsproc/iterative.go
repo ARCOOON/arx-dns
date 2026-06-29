@@ -67,6 +67,13 @@ func NewIterativeResolver(rootHints []string, stats *telemetry.Stats, logger *sl
 	}
 }
 
+// SetDNSSECValidation enables or disables the EDNS DO bit on iterative queries.
+func (r *IterativeResolver) SetDNSSECValidation(enabled bool) {
+	if r != nil {
+		r.dnssecValidation = enabled
+	}
+}
+
 // ECSCacheContext returns an empty ECS context; iterative resolution does not forward ECS.
 func (r *IterativeResolver) ECSCacheContext(_ netip.Addr) storage.ECSContext {
 	return storage.ECSContext{}

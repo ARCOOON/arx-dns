@@ -10,6 +10,7 @@ import (
 
 	mdns "github.com/miekg/dns"
 
+	"github.com/ARCOOON/arx-dns/internal/acl"
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/storage"
@@ -17,12 +18,13 @@ import (
 )
 
 // ApplyRuntimeConfig updates hot-reloadable processor fields from configuration.
-func (p *Processor) ApplyRuntimeConfig(cfg config.Config, trustedACL, xfrACL TrustedChecker) {
+func (p *Processor) ApplyRuntimeConfig(cfg config.Config, trustedACL, xfrACL TrustedChecker, policyEngine *acl.Engine) {
 	if p == nil {
 		return
 	}
 	p.acl = trustedACL
 	p.xfrACL = xfrACL
+	p.policyEngine = policyEngine
 	p.dnssecValidation = cfg.Security.DNSSECValidation
 	p.resolverMode = cfg.ResolverMode()
 	p.zonesDir = cfg.Zones.Directory
@@ -31,6 +33,9 @@ func (p *Processor) ApplyRuntimeConfig(cfg config.Config, trustedACL, xfrACL Tru
 	if p.forwarder != nil {
 		p.forwarder.SetDNSSECValidation(cfg.Security.DNSSECValidation)
 		p.forwarder.SetECS(cfg.ECS.Enabled, uint8(cfg.ECS.IPv4PrefixLength), uint8(cfg.ECS.IPv6PrefixLength))
+	}
+	if p.iterative != nil {
+		p.iterative.SetDNSSECValidation(cfg.Security.DNSSECValidation)
 	}
 	if cfg.Security.DNSSECValidation {
 		if res := p.activeResolver(); res != nil {
@@ -75,11 +80,12 @@ type Processor struct {
 	xfrEnabled       bool
 	xfrACL           TrustedChecker
 	notifier         ZoneChangeNotifier
+	policyEngine     *acl.Engine
 	logger           *slog.Logger
 }
 
 // New creates a DNS processor backed by the given storage engine.
-func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolver, resolverMode string, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, queryACL *QueryAccessChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, logger *slog.Logger) *Processor {
+func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolver, resolverMode string, cache *storage.ResponseCache, stats *telemetry.Stats, acl TrustedChecker, queryACL *QueryAccessChecker, fw *firewall.Engine, dnssecValidation bool, cookies CookieHandler, tsigSecrets map[string]string, zonesDir string, xfrEnabled bool, xfrACL TrustedChecker, notifier ZoneChangeNotifier, policyEngine *acl.Engine, logger *slog.Logger) *Processor {
 	p := &Processor{
 		store:            store,
 		forwarder:        forwarder,
@@ -97,6 +103,7 @@ func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolv
 		xfrEnabled:       xfrEnabled,
 		xfrACL:           xfrACL,
 		notifier:         notifier,
+		policyEngine:     policyEngine,
 		logger:           logger,
 	}
 	if dnssecValidation {
@@ -115,6 +122,14 @@ func (p *Processor) activeResolver() ExchangeResolver {
 		return p.forwarder
 	}
 	return nil
+}
+
+// IterativeResolver returns the iterative resolver when configured.
+func (p *Processor) IterativeResolver() *IterativeResolver {
+	if p == nil {
+		return nil
+	}
+	return p.iterative
 }
 
 // Response parses a UDP DNS query and returns a response with EDNS0 truncation when needed.
@@ -158,6 +173,11 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 		return p.queryACLRefusedResponse(req, limitUDP, client, cookieCtx)
 	}
 
+	if p.policyEngine != nil && !p.policyEngine.AllowQuery(client) {
+		cookieCtx := p.parseRequestCookie(req, client)
+		return p.queryACLRefusedResponse(req, limitUDP, client, cookieCtx)
+	}
+
 	cookieCtx := p.parseRequestCookie(req, client)
 	if cookieCtx.rejectBadCookie {
 		return p.badCookieResponse(req, client, cookieCtx, limitUDP)
@@ -176,8 +196,14 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
 	}
 
-	trusted := p.clientTrusted(client)
+	view := p.selectView(client, req)
 	q := req.Question[0]
+
+	if apex, ok := p.findAuthoritativeZone(q.Name); ok {
+		if p.policyEngine != nil && !p.policyEngine.AllowQueryZone(client, apex) {
+			return p.queryACLRefusedResponse(req, limitUDP, client, cookieCtx)
+		}
+	}
 
 	if q.Qtype == mdns.TypeAXFR || q.Qtype == mdns.TypeIXFR {
 		return p.xfrRefusedResponse(req, client, cookieCtx, limitUDP)
@@ -187,10 +213,10 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 		return p.blockedResponse(req, q, limitUDP, client, cookieCtx)
 	}
 
-	records, rcode, needsForward := p.resolveQuestion(q, trusted)
+	records, rcode, needsForward := p.resolveQuestion(q, view)
 
 	if needsForward && req.RecursionDesired {
-		if !trusted {
+		if !p.allowRecursion(client) {
 			return p.refusedResponse(req, limitUDP, client, cookieCtx)
 		}
 		if res := p.activeResolver(); res != nil {
@@ -215,10 +241,39 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 }
 
 func (p *Processor) clientTrusted(client netip.Addr) bool {
+	if p.policyEngine != nil {
+		return p.policyEngine.AllowRecursion(client)
+	}
 	if p.acl == nil {
 		return true
 	}
 	return p.acl.Trusted(client)
+}
+
+func (p *Processor) allowRecursion(client netip.Addr) bool {
+	return p.clientTrusted(client)
+}
+
+func (p *Processor) selectView(client netip.Addr, req *mdns.Msg) storage.ZoneView {
+	if p.policyEngine != nil {
+		return storage.ZoneView(p.policyEngine.SelectView(client, req))
+	}
+	if p.clientTrusted(client) {
+		return storage.ViewInternal
+	}
+	return storage.ViewPublic
+}
+
+func (p *Processor) findAuthoritativeZone(qname string) (string, bool) {
+	qname = storage.NormalizeName(qname)
+	labels := splitDNSLabels(qname)
+	for i := len(labels) - 1; i >= 0; i-- {
+		apex := strings.Join(labels[i:], ".") + "."
+		if p.store.ZoneExists(apex, storage.ViewPublic) || p.store.ZoneExists(apex, storage.ViewInternal) {
+			return apex, true
+		}
+	}
+	return "", false
 }
 
 func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
@@ -515,16 +570,16 @@ func (p *Processor) packResponse(resp, req *mdns.Msg, limitUDP bool, client neti
 	return resp.Pack()
 }
 
-func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []mdns.RR, rcode int, needsForward bool) {
+func (p *Processor) resolveQuestion(q mdns.Question, view storage.ZoneView) (records []mdns.RR, rcode int, needsForward bool) {
 	switch q.Qtype {
 	case mdns.TypeA, mdns.TypeAAAA:
-		records, rcode = p.resolveAddress(q.Name, q.Qtype, trusted)
+		records, rcode = p.resolveAddress(q.Name, q.Qtype, view)
 		needsForward = rcode == mdns.RcodeNameError && !isActiveDirectoryQuery(q.Name)
 	case mdns.TypeANY:
-		records, rcode, needsForward = p.resolveANY(q.Name, trusted)
+		records, rcode, needsForward = p.resolveANY(q.Name, view)
 	default:
 		var status storage.LookupStatus
-		records, status = p.authoritativeLookup(q.Name, q.Qtype, trusted)
+		records, status = p.authoritativeLookup(q.Name, q.Qtype, view)
 		switch status {
 		case storage.LookupFound:
 			rcode = mdns.RcodeSuccess
@@ -541,15 +596,15 @@ func (p *Processor) resolveQuestion(q mdns.Question, trusted bool) (records []md
 // resolveANY implements RFC 8482 mitigation for QTYPE ANY (255). Instead of
 // returning every RRset at the name, the server answers with a single synthesized
 // HINFO record and sets the TC bit to discourage amplification.
-func (p *Processor) resolveANY(name string, trusted bool) ([]mdns.RR, int, bool) {
-	if !p.nameExistsInZone(name, trusted) {
+func (p *Processor) resolveANY(name string, view storage.ZoneView) ([]mdns.RR, int, bool) {
+	if !p.nameExistsInZone(name, view) {
 		if isActiveDirectoryQuery(name) {
 			return nil, mdns.RcodeNameError, false
 		}
 		return nil, mdns.RcodeNameError, true
 	}
 
-	if soa := p.lookupZoneSOA(name, trusted); soa != nil {
+	if soa := p.lookupZoneSOA(name, view); soa != nil {
 		return []mdns.RR{mdns.Copy(soa)}, mdns.RcodeSuccess, false
 	}
 
@@ -566,18 +621,18 @@ func (p *Processor) resolveANY(name string, trusted bool) ([]mdns.RR, int, bool)
 	return []mdns.RR{hinfo}, mdns.RcodeSuccess, false
 }
 
-func (p *Processor) nameExistsInZone(name string, trusted bool) bool {
-	if trusted && p.store.NameExistsInternal(name) {
+func (p *Processor) nameExistsInZone(name string, view storage.ZoneView) bool {
+	if view == storage.ViewInternal && p.store.NameExistsInternal(name) {
 		return true
 	}
 	return p.store.NameExistsPublic(name)
 }
 
-func (p *Processor) lookupZoneSOA(name string, trusted bool) mdns.RR {
+func (p *Processor) lookupZoneSOA(name string, view storage.ZoneView) mdns.RR {
 	labels := splitDNSLabels(storage.NormalizeName(name))
 	for i := len(labels) - 1; i >= 0; i-- {
 		apex := strings.Join(labels[i:], ".") + "."
-		records, status := p.authoritativeLookup(apex, mdns.TypeSOA, trusted)
+		records, status := p.authoritativeLookup(apex, mdns.TypeSOA, view)
 		if status == storage.LookupFound && len(records) > 0 {
 			return records[0]
 		}
@@ -593,8 +648,8 @@ func splitDNSLabels(fqdn string) []string {
 	return strings.Split(fqdn, ".")
 }
 
-func (p *Processor) authoritativeLookup(name string, qtype uint16, trusted bool) ([]mdns.RR, storage.LookupStatus) {
-	if trusted {
+func (p *Processor) authoritativeLookup(name string, qtype uint16, view storage.ZoneView) ([]mdns.RR, storage.LookupStatus) {
+	if view == storage.ViewInternal {
 		records, status := p.store.LookupInternal(name, qtype)
 		if status != storage.LookupNotFound {
 			return records, status
@@ -604,8 +659,8 @@ func (p *Processor) authoritativeLookup(name string, qtype uint16, trusted bool)
 }
 
 // resolveAddress returns A or AAAA records, following CNAME chains when needed.
-func (p *Processor) resolveAddress(name string, qtype uint16, trusted bool) ([]mdns.RR, int) {
-	records, status := p.authoritativeLookup(name, qtype, trusted)
+func (p *Processor) resolveAddress(name string, qtype uint16, view storage.ZoneView) ([]mdns.RR, int) {
+	records, status := p.authoritativeLookup(name, qtype, view)
 	switch status {
 	case storage.LookupFound:
 		return records, mdns.RcodeSuccess
@@ -613,13 +668,13 @@ func (p *Processor) resolveAddress(name string, qtype uint16, trusted bool) ([]m
 		return nil, mdns.RcodeNameError
 	}
 
-	return p.followCNAMEChain(name, qtype, trusted)
+	return p.followCNAMEChain(name, qtype, view)
 }
 
 // followCNAMEChain walks CNAME aliases until the requested address type is found,
 // the chain ends, or a loop/depth limit is hit. Each lookup loads the active radix
 // tree pointer atomically, so concurrent callers need no locks.
-func (p *Processor) followCNAMEChain(startName string, qtype uint16, trusted bool) ([]mdns.RR, int) {
+func (p *Processor) followCNAMEChain(startName string, qtype uint16, view storage.ZoneView) ([]mdns.RR, int) {
 	answer := make([]mdns.RR, 0, 4)
 	visited := make(map[string]struct{}, maxCNAMEChainDepth)
 	current := storage.NormalizeName(startName)
@@ -630,7 +685,7 @@ func (p *Processor) followCNAMEChain(startName string, qtype uint16, trusted boo
 		}
 		visited[current] = struct{}{}
 
-		records, status := p.authoritativeLookup(current, qtype, trusted)
+		records, status := p.authoritativeLookup(current, qtype, view)
 		switch status {
 		case storage.LookupFound:
 			return append(answer, records...), mdns.RcodeSuccess
@@ -641,7 +696,7 @@ func (p *Processor) followCNAMEChain(startName string, qtype uint16, trusted boo
 			return nil, mdns.RcodeNameError
 		}
 
-		cnames, status := p.authoritativeLookup(current, mdns.TypeCNAME, trusted)
+		cnames, status := p.authoritativeLookup(current, mdns.TypeCNAME, view)
 		if status != storage.LookupFound {
 			return answer, mdns.RcodeSuccess
 		}
