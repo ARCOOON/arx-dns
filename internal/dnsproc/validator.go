@@ -172,7 +172,7 @@ func (v *DNSSECValidator) validateRootZone() ([]mdns.RR, error) {
 	if err := Validate(dnskeys, dnskeySigs, dnskeys); err != nil {
 		return nil, fmt.Errorf("%w: root dnskey signature: %v", ErrDNSSECValidationFailed, err)
 	}
-	if !anchorsPresentInDNSKEYs(anchors, dnskeys) {
+	if !anchorsMatchRootTrust(anchors, dnskeys) {
 		return nil, fmt.Errorf("%w: root dnskey set does not contain trust anchor", ErrDNSSECValidationFailed)
 	}
 	return dnskeys, nil
@@ -245,6 +245,19 @@ func (v *DNSSECValidator) fetchSignedRRSet(name string, qtype uint16) (rrset []m
 		}
 	}
 	return rrset, sigs, nil
+}
+
+func anchorsMatchRootTrust(anchors, dnskeys []mdns.RR) bool {
+	dsRecords := make([]mdns.RR, 0, len(anchors))
+	for _, anchorRR := range anchors {
+		if ds, ok := anchorRR.(*mdns.DS); ok {
+			dsRecords = append(dsRecords, ds)
+		}
+	}
+	if len(dsRecords) > 0 && dsMatchesKSK(dsRecords, dnskeys) {
+		return true
+	}
+	return anchorsPresentInDNSKEYs(anchors, dnskeys)
 }
 
 func anchorsPresentInDNSKEYs(anchors, dnskeys []mdns.RR) bool {

@@ -305,18 +305,19 @@ func normalizeRootHintAddress(raw string) (string, error) {
 		return "", errors.New("empty root hint address")
 	}
 
-	if host, port, err := net.SplitHostPort(raw); err == nil {
-		if net.ParseIP(host) == nil {
-			return "", fmt.Errorf("invalid root hint IP %q", host)
-		}
-		if port == "" {
-			port = "53"
-		}
-		return net.JoinHostPort(host, port), nil
+	parsed, err := config.ParseUpstreamAddress(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid root hint IP %q: %w", raw, err)
 	}
-
-	if net.ParseIP(raw) == nil {
-		return "", fmt.Errorf("invalid root hint IP %q", raw)
+	if net.ParseIP(strings.Trim(parsed, "[]")) == nil {
+		// Root hints must be IP literals; reject hostnames.
+		host, _, splitErr := net.SplitHostPort(parsed)
+		if splitErr != nil {
+			host = parsed
+		}
+		if net.ParseIP(strings.Trim(host, "[]")) == nil {
+			return "", fmt.Errorf("invalid root hint IP %q", raw)
+		}
 	}
-	return net.JoinHostPort(raw, "53"), nil
+	return parsed, nil
 }

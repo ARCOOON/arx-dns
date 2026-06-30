@@ -7,6 +7,7 @@ import (
 	"github.com/ARCOOON/arx-dns/internal/acl"
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
+	"github.com/ARCOOON/arx-dns/internal/dnssec"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
 	"github.com/ARCOOON/arx-dns/internal/logger"
 	"github.com/ARCOOON/arx-dns/internal/network"
@@ -75,6 +76,10 @@ func (a *Applier) Apply(cfg config.Config) error {
 
 	if a.Processor != nil {
 		a.Processor.ApplyRuntimeConfig(cfg, trustedACL, xfrACL, policyEngine)
+	}
+
+	if err := dnssec.ApplyCustomAnchors(cfg.Security.NormalizedRootAnchors()); err != nil {
+		return fmt.Errorf("apply root anchors: %w", err)
 	}
 
 	if cfg.ResolverMode() == "forward" && a.Forwarder != nil {

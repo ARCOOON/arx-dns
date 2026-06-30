@@ -73,9 +73,10 @@ type RateLimitConfig struct {
 
 // SecurityConfig controls DNSSEC, DNS Cookies, and related validation policies.
 type SecurityConfig struct {
-	DNSSECValidation  bool   `toml:"dnssec_validation" json:"dnssec_validation"`
-	DNSCookiesEnabled bool   `toml:"dns_cookies_enabled" json:"dns_cookies_enabled"`
-	DNSCookieSecret   string `toml:"dns_cookie_secret" json:"dns_cookie_secret,omitempty"`
+	DNSSECValidation  bool     `toml:"dnssec_validation" json:"dnssec_validation"`
+	DNSCookiesEnabled bool     `toml:"dns_cookies_enabled" json:"dns_cookies_enabled"`
+	DNSCookieSecret   string   `toml:"dns_cookie_secret" json:"dns_cookie_secret,omitempty"`
+	RootAnchors       []string `toml:"root_anchors" json:"root_anchors"`
 }
 
 // ServerConfig controls the DNS listener bind address and reactor sizing.
@@ -139,8 +140,8 @@ const (
 	defaultZonesDir          = "./zones"
 	defaultBlocklistsDir     = "./blocklists"
 	defaultBlockAction       = "NXDOMAIN"
-	defaultUpstreamPrimary   = "1.1.1.1:53"
-	defaultUpstreamSecondary = "1.0.0.1:53"
+	defaultUpstreamPrimary   = "1.1.1.1"
+	defaultUpstreamSecondary = "1.0.0.1"
 	defaultAPIListen         = "127.0.0.1:8080"
 	defaultAPIAuthToken      = "dev-token-change-me"
 	defaultRateLimitRPS      = 100
@@ -558,7 +559,7 @@ func (c *Config) normalizeUpstreamsForStorage() error {
 	if c.ResolverMode() != "forward" {
 		return nil
 	}
-	normalized, err := c.NormalizedUpstreams()
+	normalized, err := c.ValidatedUpstreams()
 	if err != nil {
 		return err
 	}
@@ -682,6 +683,9 @@ func (c Config) DNSCookieSecretBytes() ([]byte, error) {
 }
 
 func (c Config) validateSecurity() error {
+	if err := c.Security.ValidateRootAnchors(); err != nil {
+		return err
+	}
 	if !c.Security.DNSCookiesEnabled {
 		return nil
 	}
@@ -837,7 +841,7 @@ func (c Config) ResolverMode() string {
 func (c Config) validateResolver() error {
 	switch c.ResolverMode() {
 	case "forward":
-		if _, err := c.NormalizedUpstreams(); err != nil {
+		if _, err := c.ValidatedUpstreams(); err != nil {
 			return err
 		}
 	case "iterative":
@@ -848,35 +852,24 @@ func (c Config) validateResolver() error {
 	return nil
 }
 
-// NormalizedUpstreams returns upstream resolver addresses in host:port form.
+// NormalizedUpstreams returns upstream resolver addresses in host:port form for dialing.
 func (c Config) NormalizedUpstreams() ([]string, error) {
-	out := make([]string, 0, len(c.Recursive.Upstreams))
-
-	for _, part := range c.Recursive.Upstreams {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-
-		host, port, err := net.SplitHostPort(part)
-		if err != nil {
-			if strings.Contains(err.Error(), "missing port") {
-				part = net.JoinHostPort(part, "53")
-			} else {
-				return nil, fmt.Errorf("invalid upstream %q: %w", part, err)
-			}
-		} else if host == "" || port == "" {
-			return nil, fmt.Errorf("invalid upstream address %q", part)
-		}
-
-		out = append(out, part)
+	validated, err := c.ValidatedUpstreams()
+	if err != nil {
+		return nil, err
 	}
-
-	if len(out) == 0 {
-		return nil, errors.New("at least one upstream DNS server is required")
+	out := make([]string, len(validated))
+	for i, addr := range validated {
+		out[i] = DialUpstreamAddress(addr)
 	}
-
 	return out, nil
+}
+
+// ForAPIResponse returns a copy of cfg with upstream ports normalized for UI display.
+func (c Config) ForAPIResponse() Config {
+	out := c
+	out.Recursive.Upstreams = DisplayUpstreams(c.Recursive.Upstreams)
+	return out
 }
 
 func (c Config) validateXFR() error {

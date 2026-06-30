@@ -274,9 +274,10 @@ func (r *IterativeResolver) queryServers(req *mdns.Msg, servers []string) (*mdns
 
 	for _, server := range r.sortServers(servers) {
 		lastServer = server
-		ip, hasIP := serverIP(server)
+		dialAddr := config.DialUpstreamAddress(server)
+		ip, hasIP := serverIP(dialAddr)
 		start := time.Now()
-		resp, _, err := r.client.Exchange(req, server)
+		resp, _, err := r.client.Exchange(req, dialAddr)
 		elapsed := time.Since(start)
 
 		if r.logger != nil {

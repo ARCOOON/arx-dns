@@ -31,7 +31,7 @@ func (s *Server) setConfig(cfg config.Config) {
 }
 
 func (s *Server) handleConfigGet(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.currentConfig())
+	writeJSON(w, http.StatusOK, s.currentConfig().ForAPIResponse())
 }
 
 func (s *Server) handleConfigPut(w http.ResponseWriter, r *http.Request) {

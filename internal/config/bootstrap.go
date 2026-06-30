@@ -19,7 +19,7 @@ log_level = 'INFO'
 directory = './zones'
 
 [recursive]
-upstreams = ['1.1.1.1:53', '1.0.0.1:53']
+upstreams = ['1.1.1.1', '1.0.0.1']
 trusted_subnets = ['127.0.0.0/8', '10.0.0.0/8', '192.168.0.0/16']
 
 [resolver]
@@ -36,6 +36,7 @@ block_action = 'NXDOMAIN'
 dnssec_validation = true
 dns_cookies_enabled = true
 dns_cookie_secret = ''
+root_anchors = []
 
 [rate_limit]
 enabled = true

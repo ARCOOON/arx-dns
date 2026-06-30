@@ -24,10 +24,89 @@ var (
 
 // InitAnchors parses the embedded root trust anchors. Call once at process startup.
 func InitAnchors() error {
+	return InitAnchorsWithCustom(nil)
+}
+
+// InitAnchorsWithCustom parses embedded IANA anchors plus optional custom trust anchor records.
+func InitAnchorsWithCustom(customLines []string) error {
 	anchorOnce.Do(func() {
-		rootKeys, anchorErr = parseAnchorRecords(embeddedRootAnchors)
+		rootKeys, anchorErr = loadAnchors(customLines)
 	})
 	return anchorErr
+}
+
+// ApplyCustomAnchors reloads embedded and custom root trust anchors at runtime.
+func ApplyCustomAnchors(customLines []string) error {
+	keys, err := loadAnchors(customLines)
+	if err != nil {
+		return err
+	}
+	rootKeys = keys
+	anchorErr = nil
+	return nil
+}
+
+func loadAnchors(customLines []string) ([]mdns.RR, error) {
+	keys, err := parseAnchorRecords(embeddedRootAnchors)
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range customLines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		rr, err := mdns.NewRR(line)
+		if err != nil {
+			return nil, fmt.Errorf("parse custom root anchor %q: %w", line, err)
+		}
+		switch anchor := rr.(type) {
+		case *mdns.DNSKEY:
+			if anchor.Flags&mdns.SEP == 0 {
+				return nil, fmt.Errorf("custom root anchor DNSKEY is not a KSK: %s", line)
+			}
+			keys = appendAnchorIfMissing(keys, anchor)
+		case *mdns.DS:
+			keys = appendAnchorIfMissing(keys, anchor)
+		default:
+			return nil, fmt.Errorf("custom root anchor must be DNSKEY or DS: %s", line)
+		}
+	}
+	return keys, nil
+}
+
+func appendAnchorIfMissing(keys []mdns.RR, rr mdns.RR) []mdns.RR {
+	for _, existing := range keys {
+		if anchorRecordsEqual(existing, rr) {
+			return keys
+		}
+	}
+	return append(keys, rr)
+}
+
+func anchorRecordsEqual(a, b mdns.RR) bool {
+	switch left := a.(type) {
+	case *mdns.DNSKEY:
+		right, ok := b.(*mdns.DNSKEY)
+		if !ok {
+			return false
+		}
+		return left.KeyTag() == right.KeyTag() &&
+			left.Algorithm == right.Algorithm &&
+			left.Flags == right.Flags &&
+			strings.EqualFold(left.PublicKey, right.PublicKey)
+	case *mdns.DS:
+		right, ok := b.(*mdns.DS)
+		if !ok {
+			return false
+		}
+		return left.KeyTag == right.KeyTag &&
+			left.Algorithm == right.Algorithm &&
+			left.DigestType == right.DigestType &&
+			strings.EqualFold(left.Digest, right.Digest)
+	default:
+		return false
+	}
 }
 
 // RootAnchors returns the initialized root DNSKEY trust anchors.

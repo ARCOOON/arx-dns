@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/netip"
 	"strings"
 	"time"
@@ -36,7 +35,7 @@ type Forwarder struct {
 
 // NewForwarderFromConfig builds an upstream forwarder from application configuration.
 func NewForwarderFromConfig(cfg config.Config, stats *telemetry.Stats, logger *slog.Logger) (*Forwarder, error) {
-	addrs, err := cfg.NormalizedUpstreams()
+	addrs, err := cfg.ValidatedUpstreams()
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +83,7 @@ func ParseUpstreams(raw string) ([]string, error) {
 	return NormalizeUpstreams(parts)
 }
 
-// NormalizeUpstreams normalizes each upstream entry to host:port form.
+// NormalizeUpstreams validates each upstream entry and returns the storage form.
 func NormalizeUpstreams(addrs []string) ([]string, error) {
 	out := make([]string, 0, len(addrs))
 
@@ -94,18 +93,11 @@ func NormalizeUpstreams(addrs []string) ([]string, error) {
 			continue
 		}
 
-		host, port, err := net.SplitHostPort(part)
+		parsed, err := config.ParseUpstreamAddress(part)
 		if err != nil {
-			if strings.Contains(err.Error(), "missing port") {
-				part = net.JoinHostPort(part, "53")
-			} else {
-				return nil, fmt.Errorf("invalid upstream %q: %w", part, err)
-			}
-		} else if host == "" || port == "" {
-			return nil, fmt.Errorf("invalid upstream address %q", part)
+			return nil, fmt.Errorf("invalid upstream %q: %w", part, err)
 		}
-
-		out = append(out, part)
+		out = append(out, parsed)
 	}
 
 	if len(out) == 0 {
@@ -125,9 +117,10 @@ func (f *Forwarder) Exchange(req *mdns.Msg, client netip.Addr) (*mdns.Msg, error
 	qname, qtypeStr := iterativeQueryLabels(upstreamReq)
 
 	for _, upstream := range f.rtt.SortServers(f.upstreams) {
-		ip, hasIP := serverIP(upstream)
+		dialAddr := config.DialUpstreamAddress(upstream)
+		ip, hasIP := serverIP(dialAddr)
 		start := time.Now()
-		resp, _, err := f.client.Exchange(upstreamReq, upstream)
+		resp, _, err := f.client.Exchange(upstreamReq, dialAddr)
 		elapsed := time.Since(start)
 
 		if f.logger != nil {
@@ -261,7 +254,7 @@ func (f *Forwarder) SetUpstreams(raw []string) error {
 	cfg := config.Config{
 		Recursive: config.RecursiveConfig{Upstreams: raw},
 	}
-	addrs, err := cfg.NormalizedUpstreams()
+	addrs, err := cfg.ValidatedUpstreams()
 	if err != nil {
 		return err
 	}
