@@ -68,6 +68,7 @@ export interface SecurityConfig {
   dnssec_validation: boolean
   dns_cookies_enabled: boolean
   dns_cookie_secret?: string
+  root_anchors: string[]
 }
 
 export interface UpdateConfig {

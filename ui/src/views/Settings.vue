@@ -59,6 +59,7 @@ import {
   type ToastPosition,
 } from '@/composables/useToastPosition'
 import { parseApiError } from '@/utils/apiError'
+import { normalizeUpstreamAddress, normalizeUpstreamList } from '@/utils/upstreamAddress'
 
 const TAB_IDS = ['dns', 'security', 'logging', 'ui'] as const
 type TabId = (typeof TAB_IDS)[number]
@@ -84,6 +85,7 @@ const requiresRestart = ref(false)
 const toastPosition = useToastPosition()
 
 const upstreams = ref<string[]>([])
+const rootAnchors = ref<string[]>([])
 
 const aclConfig = ref<ACLConfig | null>(null)
 const aclLoading = ref(true)
@@ -103,6 +105,10 @@ const upstreamDialogOpen = ref(false)
 const upstreamInput = ref('')
 const deletingUpstreamIndex = ref<number | null>(null)
 
+const rootAnchorDialogOpen = ref(false)
+const rootAnchorInput = ref('')
+const deletingRootAnchorIndex = ref<number | null>(null)
+
 function isValidTab(value: string): value is TabId {
   return TAB_IDS.includes(value as TabId)
 }
@@ -119,7 +125,8 @@ function syncTabFromRoute(): void {
 }
 
 function applyConfigToForm(cfg: AppConfig): void {
-  upstreams.value = [...cfg.recursive.upstreams]
+  upstreams.value = normalizeUpstreamList(cfg.recursive.upstreams)
+  rootAnchors.value = [...(cfg.security.root_anchors ?? [])]
 }
 
 function applyACLToForm(cfg: ACLConfig | null | undefined): void {
@@ -164,8 +171,9 @@ function buildConfigPayload(): AppConfig {
     throw new Error('configuration is not loaded')
   }
   const payload = cloneAppConfig(config.value)
-  payload.recursive.upstreams = upstreams.value
-    .map((upstream) => upstream.trim())
+  payload.recursive.upstreams = normalizeUpstreamList(upstreams.value)
+  payload.security.root_anchors = rootAnchors.value
+    .map((anchor) => anchor.trim())
     .filter(Boolean)
   return payload
 }
@@ -283,7 +291,7 @@ function openUpstreamDialog(): void {
 }
 
 function addUpstream(): void {
-  const upstream = upstreamInput.value.trim()
+  const upstream = normalizeUpstreamAddress(upstreamInput.value)
   if (!upstream) {
     notify('Upstream IP or hostname is required', 'error')
     return
@@ -300,6 +308,31 @@ function removeUpstream(index: number): void {
   deletingUpstreamIndex.value = index
   upstreams.value = upstreams.value.filter((_, i) => i !== index)
   deletingUpstreamIndex.value = null
+}
+
+function openRootAnchorDialog(): void {
+  rootAnchorInput.value = ''
+  rootAnchorDialogOpen.value = true
+}
+
+function addRootAnchor(): void {
+  const anchor = rootAnchorInput.value.trim()
+  if (!anchor) {
+    notify('Trust anchor record is required', 'error')
+    return
+  }
+  if (rootAnchors.value.includes(anchor)) {
+    notify('Trust anchor is already listed', 'error')
+    return
+  }
+  rootAnchors.value = [...rootAnchors.value, anchor]
+  rootAnchorDialogOpen.value = false
+}
+
+function removeRootAnchor(index: number): void {
+  deletingRootAnchorIndex.value = index
+  rootAnchors.value = rootAnchors.value.filter((_, i) => i !== index)
+  deletingRootAnchorIndex.value = null
 }
 
 watch(activeTab, (tab) => {
@@ -385,6 +418,53 @@ onMounted(() => {
                 <div class="grid gap-2">
                   <Label for="root-hints-file">Root hints file</Label>
                   <Input id="root-hints-file" v-model="config.resolver.root_hints_file" />
+                </div>
+              </div>
+
+              <div class="space-y-4 rounded-md border p-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="space-y-1">
+                    <p class="text-sm font-medium">DNSSEC Root Anchors</p>
+                    <p class="text-xs text-muted-foreground">
+                      IANA root KSK trust anchors are embedded by default. Add custom DNSKEY or DS records here only
+                      for private roots or additional trust anchors.
+                    </p>
+                  </div>
+                  <Button size="sm" @click="openRootAnchorDialog">
+                    <Plus class="mr-1.5 size-4" />
+                    Add Anchor
+                  </Button>
+                </div>
+
+                <div v-if="rootAnchors.length === 0"
+                  class="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                  No custom root anchors configured. Embedded IANA KSKs are used automatically.
+                </div>
+
+                <div v-else class="overflow-x-auto rounded-md border">
+                  <table class="w-full text-sm">
+                    <thead>
+                      <tr class="border-b bg-muted/40 text-left">
+                        <th class="px-4 py-3 font-medium">Record</th>
+                        <th class="w-20 px-4 py-3 font-medium text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(anchor, index) in rootAnchors" :key="`${anchor}-${index}`"
+                        class="border-b last:border-b-0">
+                        <td class="px-4 py-3 font-mono text-xs break-all">
+                          {{ anchor }}
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                          <Button variant="ghost" size="icon" class="size-8 text-destructive hover:text-destructive"
+                            :disabled="deletingRootAnchorIndex === index" @click="removeRootAnchor(index)">
+                            <Loader2 v-if="deletingRootAnchorIndex === index" class="size-4 animate-spin" />
+                            <Trash2 v-else class="size-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -724,13 +804,36 @@ onMounted(() => {
         <div class="grid gap-4 py-2">
           <div class="grid gap-2">
             <Label for="upstream-address">IP / Hostname</Label>
-            <Input id="upstream-address" v-model="upstreamInput" placeholder="1.1.1.1 or 1.1.1.1:53" autocomplete="off"
-              @keyup.enter="addUpstream" />
+            <Input id="upstream-address" v-model="upstreamInput" placeholder="1.1.1.1 or [2606:4700::1111]:5353"
+              autocomplete="off" @keyup.enter="addUpstream" />
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="upstreamDialogOpen = false">Cancel</Button>
           <Button @click="addUpstream">Add Upstream</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog v-model:open="rootAnchorDialogOpen">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add Root Anchor</DialogTitle>
+          <DialogDescription>
+            Enter a DNSKEY or DS record in zone-file format (e.g.
+            <span class="font-mono">. 3600 IN DNSKEY 257 3 8 AwEAA…</span>).
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <Label for="root-anchor-record">Trust anchor record</Label>
+            <Input id="root-anchor-record" v-model="rootAnchorInput"
+              placeholder=". 3600 IN DNSKEY 257 3 8 AwEAA…" autocomplete="off" @keyup.enter="addRootAnchor" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="rootAnchorDialogOpen = false">Cancel</Button>
+          <Button @click="addRootAnchor">Add Anchor</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
