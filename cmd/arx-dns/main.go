@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := dnssec.InitAnchors(); err != nil {
+	if err := dnssec.InitAnchorsWithCustom(cfg.Security.NormalizedRootAnchors()); err != nil {
 		slog.Default().Error("failed to initialize DNSSEC root anchors", "error", err)
 		os.Exit(1)
 	}
