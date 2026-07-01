@@ -95,6 +95,13 @@ func (c Config) startupSummarySections(configPath string) []summarySection {
 			),
 		},
 		{
+			tag: "[rpz]",
+			fields: joinSummaryFields(
+				summaryBool("enabled", c.RPZ.Enabled),
+				summaryInt("policies", len(c.RPZ.Policies)),
+			),
+		},
+		{
 			tag: "[security]",
 			fields: joinSummaryFields(
 				summaryBool("dnssec_validation", c.Security.DNSSECValidation),

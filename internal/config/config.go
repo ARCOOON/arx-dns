@@ -34,6 +34,7 @@ type Config struct {
 	XFR       XFRConfig       `toml:"xfr" json:"xfr"`
 	ACL       ACLConfig       `toml:"acl" json:"acl"`
 	Views     ViewsConfig     `toml:"views" json:"views"`
+	RPZ       RPZConfig       `toml:"rpz" json:"rpz"`
 }
 
 // LoggingConfig controls structured log file rotation parameters.
@@ -413,6 +414,9 @@ func (c Config) Validate() error {
 	if err := c.validateACL(); err != nil {
 		return err
 	}
+	if err := c.validateRPZ(); err != nil {
+		return err
+	}
 	if err := c.validateLogging(); err != nil {
 		return err
 	}
@@ -537,6 +541,10 @@ func MergeWithCurrent(current, incoming Config) Config {
 	}
 	if out.Views.Default == "" && len(out.Views.Entries) == 0 {
 		out.Views = current.Views
+	}
+
+	if len(out.RPZ.Policies) == 0 && !out.RPZ.Enabled {
+		out.RPZ = current.RPZ
 	}
 
 	return out

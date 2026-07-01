@@ -32,6 +32,9 @@ auto_update_root_hints = true
 blocklists_directory = './blocklists'
 block_action = 'NXDOMAIN'
 
+[rpz]
+enabled = false
+
 [security]
 dnssec_validation = true
 dns_cookies_enabled = true
