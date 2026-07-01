@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -148,6 +149,10 @@ func (s *DoTServer) serveConn(conn net.Conn) {
 			return nil
 		})
 		if err != nil {
+			if errors.Is(err, dnsproc.ErrPolicyDrop) {
+				deadline = time.Now().Add(tcpReadTimeout)
+				continue
+			}
 			s.logger.Debug("dot query failed", "error", err, "bytes", len(payload))
 			if !isXfer {
 				s.stats.IncParseError()

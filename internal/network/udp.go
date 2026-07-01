@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/ARCOOON/arx-dns/internal/dnsproc"
@@ -59,6 +60,9 @@ func (r *UDPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 	}
 
 	response, err := r.proc.Response(client, payload)
+	if errors.Is(err, dnsproc.ErrPolicyDrop) {
+		return gnet.None
+	}
 	if err != nil {
 		r.logger.Debug("udp parse failed", "error", err, "bytes", len(payload))
 		r.stats.IncParseError()

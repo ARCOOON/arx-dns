@@ -146,6 +146,9 @@ func (s *DoHServer) writeDNSResponse(w http.ResponseWriter, r *http.Request, pay
 	}
 
 	response, err := s.proc.ResponseTCP(client, payload)
+	if errors.Is(err, dnsproc.ErrPolicyDrop) {
+		return
+	}
 	if err != nil {
 		s.logger.Debug("doh parse failed", "error", err, "bytes", len(payload))
 		s.stats.IncParseError()

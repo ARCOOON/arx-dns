@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -186,6 +187,10 @@ func (r *TCPReactor) OnTraffic(c gnet.Conn) gnet.Action {
 			return nil
 		})
 		if err != nil {
+			if errors.Is(err, dnsproc.ErrPolicyDrop) {
+				state.deadline = time.Now().Add(tcpReadTimeout)
+				continue
+			}
 			r.logger.Debug("tcp query failed", "error", err, "bytes", len(payload))
 			if !isXfer {
 				r.stats.IncParseError()
