@@ -258,3 +258,32 @@ export function updateACLConfig(config: ACLConfig): Promise<ACLConfigUpdateRespo
     body: config,
   })
 }
+
+export type RPZAction = 'NXDOMAIN' | 'NODATA' | 'DROP' | 'CNAME' | 'A' | 'AAAA'
+
+export interface RPZPolicy {
+  domain: string
+  action: RPZAction
+  target?: string
+}
+
+export interface RPZConfig {
+  enabled: boolean
+  policies: RPZPolicy[]
+}
+
+export interface RPZConfigUpdateResponse {
+  success: boolean
+  requires_restart: boolean
+}
+
+export function fetchRPZConfig(): Promise<RPZConfig> {
+  return apiRequest<RPZConfig>('/api/v1/config/rpz')
+}
+
+export function updateRPZConfig(config: RPZConfig): Promise<RPZConfigUpdateResponse> {
+  return apiRequest<RPZConfigUpdateResponse>('/api/v1/config/rpz', {
+    method: 'PUT',
+    body: config,
+  })
+}
