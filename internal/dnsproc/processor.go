@@ -13,18 +13,23 @@ import (
 	"github.com/ARCOOON/arx-dns/internal/acl"
 	"github.com/ARCOOON/arx-dns/internal/config"
 	"github.com/ARCOOON/arx-dns/internal/firewall"
+	"github.com/ARCOOON/arx-dns/internal/rpz"
 	"github.com/ARCOOON/arx-dns/internal/storage"
 	"github.com/ARCOOON/arx-dns/internal/telemetry"
 )
 
+// ErrPolicyDrop indicates the query was suppressed by policy (for example RPZ DROP).
+var ErrPolicyDrop = errors.New("policy drop")
+
 // ApplyRuntimeConfig updates hot-reloadable processor fields from configuration.
-func (p *Processor) ApplyRuntimeConfig(cfg config.Config, trustedACL, xfrACL TrustedChecker, policyEngine *acl.Engine) {
+func (p *Processor) ApplyRuntimeConfig(cfg config.Config, trustedACL, xfrACL TrustedChecker, policyEngine *acl.Engine, rpzEngine *rpz.Engine) {
 	if p == nil {
 		return
 	}
 	p.acl = trustedACL
 	p.xfrACL = xfrACL
 	p.policyEngine = policyEngine
+	p.rpz = rpzEngine
 	p.dnssecValidation = cfg.Security.DNSSECValidation
 	p.resolverMode = cfg.ResolverMode()
 	p.zonesDir = cfg.Zones.Directory
@@ -72,6 +77,7 @@ type Processor struct {
 	acl              TrustedChecker
 	queryACL         *QueryAccessChecker
 	firewall         *firewall.Engine
+	rpz              *rpz.Engine
 	dnssecValidation bool
 	validator        *DNSSECValidator
 	cookies          CookieHandler
@@ -112,6 +118,14 @@ func New(store *storage.Memory, forwarder *Forwarder, iterative *IterativeResolv
 		}
 	}
 	return p
+}
+
+// SetRPZ attaches the Response Policy Zone engine used for pre-resolution policy checks.
+func (p *Processor) SetRPZ(engine *rpz.Engine) {
+	if p == nil {
+		return
+	}
+	p.rpz = engine
 }
 
 func (p *Processor) activeResolver() ExchangeResolver {
@@ -207,6 +221,12 @@ func (p *Processor) buildResponse(client netip.Addr, payload []byte, limitUDP bo
 
 	if q.Qtype == mdns.TypeAXFR || q.Qtype == mdns.TypeIXFR {
 		return p.xfrRefusedResponse(req, client, cookieCtx, limitUDP)
+	}
+
+	if p.rpz != nil {
+		if action, target, matched := p.rpz.Evaluate(q.Name); matched {
+			return p.rpzResponse(req, q, limitUDP, client, cookieCtx, action, target)
+		}
 	}
 
 	if p.firewall != nil && p.firewall.Blocked(q.Name) {
@@ -319,6 +339,93 @@ func (p *Processor) blockedResponse(req *mdns.Msg, q mdns.Question, limitUDP boo
 	}
 
 	return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+}
+
+func (p *Processor) rpzResponse(req *mdns.Msg, q mdns.Question, limitUDP bool, client netip.Addr, cookieCtx cookieContext, action rpz.Action, target string) ([]byte, error) {
+	if p.stats != nil {
+		p.stats.IncRPZMatched()
+	}
+
+	switch action {
+	case rpz.ActionDROP:
+		return nil, ErrPolicyDrop
+	case rpz.ActionNODATA:
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		resp.Authoritative = true
+		resp.RecursionAvailable = true
+		resp.Rcode = mdns.RcodeSuccess
+		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+	case rpz.ActionCNAME:
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		resp.Authoritative = true
+		resp.RecursionAvailable = true
+		resp.Rcode = mdns.RcodeSuccess
+		if target == "" {
+			resp.Rcode = mdns.RcodeNameError
+			return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+		}
+		resp.Answer = []mdns.RR{&mdns.CNAME{
+			Hdr: mdns.RR_Header{
+				Name:   q.Name,
+				Rrtype: mdns.TypeCNAME,
+				Class:  mdns.ClassINET,
+				Ttl:    300,
+			},
+			Target: target,
+		}}
+		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+	case rpz.ActionA:
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		resp.Authoritative = true
+		resp.RecursionAvailable = true
+		resp.Rcode = mdns.RcodeSuccess
+		ip := net.ParseIP(target)
+		if ip == nil || ip.To4() == nil {
+			resp.Rcode = mdns.RcodeNameError
+			return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+		}
+		resp.Answer = []mdns.RR{&mdns.A{
+			Hdr: mdns.RR_Header{
+				Name:   q.Name,
+				Rrtype: mdns.TypeA,
+				Class:  mdns.ClassINET,
+				Ttl:    300,
+			},
+			A: ip.To4(),
+		}}
+		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+	case rpz.ActionAAAA:
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		resp.Authoritative = true
+		resp.RecursionAvailable = true
+		resp.Rcode = mdns.RcodeSuccess
+		ip := net.ParseIP(target)
+		if ip == nil || ip.To4() != nil {
+			resp.Rcode = mdns.RcodeNameError
+			return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+		}
+		resp.Answer = []mdns.RR{&mdns.AAAA{
+			Hdr: mdns.RR_Header{
+				Name:   q.Name,
+				Rrtype: mdns.TypeAAAA,
+				Class:  mdns.ClassINET,
+				Ttl:    300,
+			},
+			AAAA: ip,
+		}}
+		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+	default:
+		resp := new(mdns.Msg)
+		resp.SetReply(req)
+		resp.Authoritative = true
+		resp.RecursionAvailable = true
+		resp.Rcode = mdns.RcodeNameError
+		return p.packResponse(resp, req, limitUDP, client, cookieCtx)
+	}
 }
 
 func (p *Processor) queryACLRefusedResponse(req *mdns.Msg, limitUDP bool, client netip.Addr, cookieCtx cookieContext) ([]byte, error) {
