@@ -74,8 +74,13 @@ func (a *Applier) Apply(cfg config.Config) error {
 	}
 	a.PolicyEngine = policyEngine
 
+	rpzEngine, err := cfg.BuildRPZEngine()
+	if err != nil {
+		return fmt.Errorf("parse rpz: %w", err)
+	}
+
 	if a.Processor != nil {
-		a.Processor.ApplyRuntimeConfig(cfg, trustedACL, xfrACL, policyEngine)
+		a.Processor.ApplyRuntimeConfig(cfg, trustedACL, xfrACL, policyEngine, rpzEngine)
 	}
 
 	if err := dnssec.ApplyCustomAnchors(cfg.Security.NormalizedRootAnchors()); err != nil {
