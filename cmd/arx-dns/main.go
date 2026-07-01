@@ -180,7 +180,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	rpzEngine, err := cfg.BuildRPZEngine()
+	if err != nil {
+		logger.Error("invalid rpz configuration", "error", err)
+		os.Exit(1)
+	}
+
 	proc := dnsproc.New(store, forwarder, iterative, cfg.ResolverMode(), responseCache, stats, acl, queryACL, fw, cfg.Security.DNSSECValidation, cookieEngine, cfg.NormalizedTSIGKeys(), cfg.Zones.Directory, cfg.XFR.Enabled, xfrACL, notifier, policyEngine, logger)
+	proc.SetRPZ(rpzEngine)
 
 	if err := firewall.StartWatcher(ctx, cfg.Firewall, telemetryDB.Main(), fw, logger); err != nil {
 		logger.Error("failed to start blocklist watcher", "directory", cfg.Firewall.BlocklistsDirectory, "error", err)
