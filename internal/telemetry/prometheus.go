@@ -54,6 +54,7 @@ func NewStatsCollector(stats *Stats) *StatsCollector {
 		{name: "truncated_responses_total", help: "Total number of UDP responses truncated with the TC bit set.", load: func(s Snapshot) float64 { return float64(s.TruncatedResponses) }},
 		{name: "tcp_timeouts_total", help: "Total number of TCP connections closed due to read-frame timeout.", load: func(s Snapshot) float64 { return float64(s.TCPTimeouts) }},
 		{name: "firewall_blocked_total", help: "Total number of queries blocked by the DNS firewall blocklist engine.", load: func(s Snapshot) float64 { return float64(s.FirewallBlocked) }},
+		{name: "rpz_matched_total", help: "Total number of queries matched by the Response Policy Zone engine.", load: func(s Snapshot) float64 { return float64(s.RPZMatched) }},
 		{name: "dnssec_validations_passed_total", help: "Total number of forwarded upstream responses that passed DNSSEC signature verification.", load: func(s Snapshot) float64 { return float64(s.DNSSECValidationsPassed) }},
 		{name: "dnssec_validations_failed_total", help: "Total number of forwarded upstream responses rejected as BOGUS after DNSSEC checks.", load: func(s Snapshot) float64 { return float64(s.DNSSECValidationsFailed) }},
 		{name: "rrl_dropped_total", help: "Total number of DNS queries silently dropped by response rate limiting.", load: func(s Snapshot) float64 { return float64(s.RRLDropped) }},

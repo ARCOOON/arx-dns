@@ -30,6 +30,7 @@ type Stats struct {
 	truncatedResponses      atomic.Uint64
 	tcpTimeouts             atomic.Uint64
 	firewallBlocked         atomic.Uint64
+	rpzMatched              atomic.Uint64
 	dnssecValidationsPassed atomic.Uint64
 	dnssecValidationsFailed atomic.Uint64
 	rrlDropped              atomic.Uint64
@@ -74,6 +75,7 @@ type Snapshot struct {
 	TruncatedResponses      uint64 `json:"truncated_responses"`
 	TCPTimeouts             uint64 `json:"tcp_timeouts"`
 	FirewallBlocked         uint64 `json:"firewall_blocked"`
+	RPZMatched              uint64 `json:"rpz_matched"`
 	DNSSECValidationsPassed uint64 `json:"dnssec_validations_passed"`
 	DNSSECValidationsFailed uint64 `json:"dnssec_validations_failed"`
 	RRLDropped              uint64 `json:"rrl_dropped"`
@@ -114,6 +116,7 @@ func (s *Stats) Snapshot() Snapshot {
 		TruncatedResponses:      s.truncatedResponses.Load(),
 		TCPTimeouts:             s.tcpTimeouts.Load(),
 		FirewallBlocked:         s.firewallBlocked.Load(),
+		RPZMatched:              s.rpzMatched.Load(),
 		DNSSECValidationsPassed: s.dnssecValidationsPassed.Load(),
 		DNSSECValidationsFailed: s.dnssecValidationsFailed.Load(),
 		RRLDropped:              s.rrlDropped.Load(),
@@ -230,6 +233,10 @@ func (s *Stats) IncTCPTimeout() {
 
 func (s *Stats) IncFirewallBlocked() {
 	s.firewallBlocked.Add(1)
+}
+
+func (s *Stats) IncRPZMatched() {
+	s.rpzMatched.Add(1)
 }
 
 func (s *Stats) IncDNSSECValidationPassed() {
